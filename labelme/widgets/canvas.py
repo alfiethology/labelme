@@ -1,6 +1,6 @@
 import functools
 from typing import Literal
-
+from PyQt5.QtCore import QTimer, QPointF
 import imgviz
 import numpy as np
 import osam
@@ -106,6 +106,12 @@ class Canvas(QtWidgets.QWidget):
         self.setFocusPolicy(QtCore.Qt.WheelFocus)  # type: ignore[attr-defined]
 
         self._ai_model_name: str = "sam2:latest"
+
+        # --- Hold-to-add-point for polygon drawing ---
+        self.hold_timer = QTimer(self)
+        self.hold_timer.setInterval(500)  # 500ms = 0.5s
+        self.hold_timer.timeout.connect(self.add_point_under_cursor)
+        self.holding_mouse = False
 
     def fillDrawing(self):
         return self._fill_drawing
@@ -397,6 +403,15 @@ class Canvas(QtWidgets.QWidget):
 
         is_shift_pressed = ev.modifiers() & QtCore.Qt.ShiftModifier  # type: ignore[attr-defined]
 
+        # Start hold-to-add-point timer for polygon drawing
+        if (
+            ev.button() == QtCore.Qt.LeftButton
+            and self.drawing()
+            and self.createMode == "polygon"
+        ):
+            self.holding_mouse = True
+            self.hold_timer.start()
+
         if ev.button() == QtCore.Qt.LeftButton:  # type: ignore[attr-defined]
             if self.drawing():
                 if self.current:
@@ -475,6 +490,15 @@ class Canvas(QtWidgets.QWidget):
             self.prevPoint = pos
 
     def mouseReleaseEvent(self, ev):
+        # Stop hold-to-add-point timer for polygon drawing
+        if (
+            ev.button() == QtCore.Qt.LeftButton
+            and self.drawing()
+            and self.createMode == "polygon"
+        ):
+            self.holding_mouse = False
+            self.hold_timer.stop()
+
         if ev.button() == QtCore.Qt.RightButton:  # type: ignore[attr-defined]
             menu = self.menus[len(self.selectedShapesCopy) > 0]
             self.restoreCursor()
@@ -967,6 +991,17 @@ class Canvas(QtWidgets.QWidget):
         self.pixmap = None  # type: ignore[assignment]
         self.shapesBackups = []
         self.update()
+
+    def add_point_under_cursor(self):
+        if not self.holding_mouse or not self.drawing() or self.createMode != "polygon":
+            return
+        global_pos = QtGui.QCursor.pos()
+        widget_pos = self.mapFromGlobal(global_pos)
+        pos = self.transformPos(widget_pos)
+        if self.current:
+            self.current.addPoint(pos)
+            self.line[0] = self.current[-1]
+            self.update()
 
 
 def _update_shape_with_sam(
