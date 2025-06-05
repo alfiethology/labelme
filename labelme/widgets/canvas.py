@@ -484,7 +484,8 @@ class Canvas(QtWidgets.QWidget):
                         self.drawingPolygon.emit(True)
                         self.update()
             elif self.editing():
-                if self.selectedEdge() and ev.modifiers() == QtCore.Qt.AltModifier:  # type: ignore[attr-defined]
+                # Allow adding a point to an edge with no modifier
+                if self.selectedEdge():
                     self.addPointToEdge()
                 elif self.selectedVertex() and ev.modifiers() == (
                     QtCore.Qt.AltModifier | QtCore.Qt.ShiftModifier  # type: ignore[attr-defined]
