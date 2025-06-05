@@ -1020,8 +1020,15 @@ class Canvas(QtWidgets.QWidget):
         if not self.holding_mouse or not self.drawing() or self.createMode != "polygon":
             return
         global_pos = QtGui.QCursor.pos()
+        # Use QPointF for floating point precision
         widget_pos = self.mapFromGlobal(global_pos)
-        pos = self.transformPos(widget_pos)
+        if hasattr(widget_pos, 'x') and hasattr(widget_pos, 'y'):
+            widget_posf = QtCore.QPointF(widget_pos.x(), widget_pos.y())
+        else:
+            widget_posf = widget_pos  # Already QPointF
+        pos = self.transformPos(widget_posf)
+        # Round to 2 decimal places if you want, or just keep as float
+        pos = QtCore.QPointF(round(pos.x(), 2), round(pos.y(), 2))
         if self.current:
             self.current.addPoint(pos)
             self.line[0] = self.current[-1]
