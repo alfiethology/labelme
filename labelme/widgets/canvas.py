@@ -109,7 +109,7 @@ class Canvas(QtWidgets.QWidget):
 
         # --- Hold-to-add-point for polygon drawing ---
         self.hold_timer = QTimer(self)
-        self.hold_timer.setInterval(500)  # 500ms = 0.5s
+        self.hold_timer.setInterval(200)  # 200ms = 0.2s
         self.hold_timer.timeout.connect(self.add_point_under_cursor)
         self.holding_mouse = False
 
@@ -637,7 +637,7 @@ class Canvas(QtWidgets.QWidget):
         y1 = top - point.y()
         x2 = right - point.x()
         y2 = bottom - point.y()
-        self.offsets = QtCore.QPoint(x1, y1), QtCore.QPoint(x2, y2)
+        self.offsets = QtCore.QPoint(int(x1), int(y1)), QtCore.QPoint(int(x2), int(y2))
 
     def boundedMoveVertex(self, pos):
         index, shape = self.hVertex, self.hShape
