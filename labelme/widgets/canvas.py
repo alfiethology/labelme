@@ -399,7 +399,11 @@ class Canvas(QtWidgets.QWidget):
         self.movingShape = True  # Save changes
 
     def mousePressEvent(self, ev):
-        pos = self.transformPos(ev.localPos())
+        try:
+            pos = self.transformPos(ev.localPos())
+        except Exception as e:
+            logger.error(f"Error in transformPos: {e}")
+            return
 
         is_shift_pressed = ev.modifiers() & QtCore.Qt.ShiftModifier  # type: ignore[attr-defined]
 
@@ -417,28 +421,39 @@ class Canvas(QtWidgets.QWidget):
                 if self.current:
                     # Add point to existing shape.
                     if self.createMode == "polygon":
-                        self.current.addPoint(self.line[1])
-                        self.line[0] = self.current[-1]
-                        if self.current.isClosed():
-                            self.finalise()
+                        if len(self.line) > 1:
+                            self.current.addPoint(self.line[1])
+                            self.line[0] = self.current[-1]
+                            if self.current.isClosed():
+                                self.finalise()
+                        else:
+                            logger.warning("Line does not have enough points to add to polygon.")
                     elif self.createMode in ["rectangle", "circle", "line"]:
-                        assert len(self.current.points) == 1
-                        self.current.points = self.line.points
-                        self.finalise()
+                        if len(self.current.points) == 1 and len(self.line.points) == 2:
+                            self.current.points = self.line.points
+                            self.finalise()
+                        else:
+                            logger.warning("Invalid points for rectangle/circle/line.")
                     elif self.createMode == "linestrip":
-                        self.current.addPoint(self.line[1])
-                        self.line[0] = self.current[-1]
-                        if int(ev.modifiers()) == QtCore.Qt.ControlModifier:  # type: ignore[attr-defined]
-                            self.finalise()
+                        if len(self.line) > 1:
+                            self.current.addPoint(self.line[1])
+                            self.line[0] = self.current[-1]
+                            if int(ev.modifiers()) == QtCore.Qt.ControlModifier:  # type: ignore[attr-defined]
+                                self.finalise()
+                        else:
+                            logger.warning("Line does not have enough points for linestrip.")
                     elif self.createMode in ["ai_polygon", "ai_mask"]:
-                        self.current.addPoint(
-                            self.line.points[1],
-                            label=self.line.point_labels[1],
-                        )
-                        self.line.points[0] = self.current.points[-1]
-                        self.line.point_labels[0] = self.current.point_labels[-1]
-                        if ev.modifiers() & QtCore.Qt.ControlModifier:  # type: ignore[attr-defined]
-                            self.finalise()
+                        if len(self.line.points) > 1 and len(self.line.point_labels) > 1:
+                            self.current.addPoint(
+                                self.line.points[1],
+                                label=self.line.point_labels[1],
+                            )
+                            self.line.points[0] = self.current.points[-1]
+                            self.line.point_labels[0] = self.current.point_labels[-1]
+                            if ev.modifiers() & QtCore.Qt.ControlModifier:  # type: ignore[attr-defined]
+                                self.finalise()
+                        else:
+                            logger.warning("Line does not have enough points/labels for ai_polygon/ai_mask.")
                 elif not self.outOfPixmap(pos):
                     # Create new shape.
                     self.current = Shape(
@@ -477,7 +492,10 @@ class Canvas(QtWidgets.QWidget):
                     self.removeSelectedPoint()
 
                 group_mode = int(ev.modifiers()) == QtCore.Qt.ControlModifier  # type: ignore[attr-defined]
-                self.selectShapePoint(pos, multiple_selection_mode=group_mode)
+                try:
+                    self.selectShapePoint(pos, multiple_selection_mode=group_mode)
+                except Exception as e:
+                    logger.error(f"Error in selectShapePoint: {e}")
                 self.prevPoint = pos
                 self.repaint()
         elif ev.button() == QtCore.Qt.RightButton and self.editing():  # type: ignore[attr-defined]
@@ -485,7 +503,10 @@ class Canvas(QtWidgets.QWidget):
             if not self.selectedShapes or (
                 self.hShape is not None and self.hShape not in self.selectedShapes
             ):
-                self.selectShapePoint(pos, multiple_selection_mode=group_mode)
+                try:
+                    self.selectShapePoint(pos, multiple_selection_mode=group_mode)
+                except Exception as e:
+                    logger.error(f"Error in selectShapePoint (right click): {e}")
                 self.repaint()
             self.prevPoint = pos
 
@@ -576,7 +597,10 @@ class Canvas(QtWidgets.QWidget):
         """Select the first shape created which contains this point."""
         if self.selectedVertex():  # A vertex is marked for selection.
             index, shape = self.hVertex, self.hShape
-            shape.highlightVertex(index, shape.MOVE_VERTEX)  # type: ignore[union-attr]
+            if shape is not None and index is not None:
+                shape.highlightVertex(index, shape.MOVE_VERTEX)  # type: ignore[union-attr]
+            else:
+                logger.warning("selectShapePoint: No valid shape or vertex to highlight.")
         else:
             for shape in reversed(self.shapes):
                 if self.isVisible(shape) and shape.containsPoint(point):
