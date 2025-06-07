@@ -42,6 +42,21 @@ class Canvas(QtWidgets.QWidget):
     _createMode = "polygon"
 
     _fill_drawing = False
+    _fill_editing = False
+
+    def fillDrawing(self):
+        return self._fill_drawing
+
+    def setFillDrawing(self, value):
+        print(f"[DEBUG] setFillDrawing called with value: {value}")
+        self._fill_drawing = value
+
+    def fillEditing(self):
+        return self._fill_editing
+
+    def setFillEditing(self, value):
+        print(f"[DEBUG] setFillEditing called with value: {value}")
+        self._fill_editing = value
 
     def __init__(self, *args, **kwargs):
         self.epsilon = kwargs.pop("epsilon", 10.0)
@@ -112,31 +127,6 @@ class Canvas(QtWidgets.QWidget):
         self.hold_timer.setInterval(200)  # 200ms = 0.2s
         self.hold_timer.timeout.connect(self.add_point_under_cursor)
         self.holding_mouse = False
-
-    def fillDrawing(self):
-        return self._fill_drawing
-
-    def setFillDrawing(self, value):
-        self._fill_drawing = value
-
-    @property
-    def createMode(self):
-        return self._createMode
-
-    @createMode.setter
-    def createMode(self, value):
-        if value not in [
-            "polygon",
-            "rectangle",
-            "circle",
-            "line",
-            "point",
-            "linestrip",
-            "ai_polygon",
-            "ai_mask",
-        ]:
-            raise ValueError("Unsupported createMode: %s" % value)
-        self._createMode = value
 
     def set_ai_model_name(self, model_name: str) -> None:
         logger.debug("Setting AI model to {!r}", model_name)
@@ -739,7 +729,11 @@ class Canvas(QtWidgets.QWidget):
         Shape.scale = self.scale
         for shape in self.shapes:
             if (shape.selected or not self._hideBackround) and self.isVisible(shape):
-                shape.fill = shape.selected or shape == self.hShape
+                # Set fill for editing mode
+                if self.editing():
+                    shape.fill = self.fillEditing()
+                else:
+                    shape.fill = shape.selected or shape == self.hShape
                 shape.paint(p)
         if self.current:
             self.current.paint(p)

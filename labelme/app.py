@@ -599,6 +599,19 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._config["canvas"]["fill_drawing"]:
             fill_drawing.trigger()
 
+        fill_editing = action(
+            self.tr("Fill Editing Polygon"),
+            self.canvas.setFillEditing,
+            None,
+            "color",
+            self.tr("Fill polygon while editing"),
+            checkable=True,
+            enabled=True,
+        )
+        # Optionally set initial state from config if available
+        if self._config["canvas"].get("fill_editing", False):
+            fill_editing.trigger()
+
         # Label list context menu.
         labelMenu = QtWidgets.QMenu()
         utils.addActions(labelMenu, (edit, delete))
@@ -737,6 +750,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.file_dock.toggleViewAction(),
                 None,
                 fill_drawing,
+                fill_editing,
                 None,
                 hideAll,
                 showAll,
@@ -1348,11 +1362,19 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def loadShapes(self, shapes, replace=True):
         self._noSelectionSlot = True
-        for shape in shapes:
-            self.addLabel(shape)
-        self.labelList.clearSelection()
+        try:
+            for shape in shapes:
+                self.addLabel(shape)
+            self.labelList.clearSelection()
+        except Exception as e:
+            print(f"[ERROR] Exception while loading shapes: {e}")
+            import traceback; traceback.print_exc()
         self._noSelectionSlot = False
-        self.canvas.loadShapes(shapes, replace=replace)
+        try:
+            self.canvas.loadShapes(shapes, replace=replace)
+        except Exception as e:
+            print(f"[ERROR] Exception while loading shapes into canvas: {e}")
+            import traceback; traceback.print_exc()
 
     def loadLabels(self, shapes):
         s = []
@@ -2172,47 +2194,50 @@ class MainWindow(QtWidgets.QMainWindow):
         self.openNextImg()
 
     def importDirImages(self, dirpath, pattern=None, load=True):
-        self.actions.openNextImg.setEnabled(True)  # type: ignore[attr-defined]
-        self.actions.openPrevImg.setEnabled(True)  # type: ignore[attr-defined]
-
-        if not self.mayContinue() or not dirpath:
+        """Import images from a directory, robustly handling errors and skipping bad files."""
+        import glob
+        import traceback
+        if not dirpath or not os.path.isdir(dirpath):
+            print(f"[ERROR] Not a directory: {dirpath}")
             return
-
-        self.lastOpenDir = dirpath
-        self.filename = None
         self.fileListWidget.clear()
-
-        filenames = self.scanAllImages(dirpath)
-        if pattern:
-            try:
-                filenames = [f for f in filenames if re.search(pattern, f)]
-            except re.error:
-                pass
-        for filename in filenames:
-            label_file = osp.splitext(filename)[0] + ".json"
-            if self.output_dir:
-                label_file_without_path = osp.basename(label_file)
-                label_file = osp.join(self.output_dir, label_file_without_path)
-            item = QtWidgets.QListWidgetItem(filename)
-            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)  # type: ignore[attr-defined]
-            if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
-                item.setCheckState(Qt.Checked)  # type: ignore[attr-defined]
-            else:
-                item.setCheckState(Qt.Unchecked)  # type: ignore[attr-defined]
-            self.fileListWidget.addItem(item)
-        self.openNextImg(load=load)
-
-    def scanAllImages(self, folderPath):
+        self.lastOpenDir = dirpath
         extensions = [
             ".%s" % fmt.data().decode().lower()
             for fmt in QtGui.QImageReader.supportedImageFormats()
         ]
-
-        images = []
-        for root, dirs, files in os.walk(folderPath):
-            for file in files:
-                if file.lower().endswith(tuple(extensions)):
-                    relativePath = os.path.normpath(osp.join(root, file))
-                    images.append(relativePath)
-        images = natsort.os_sorted(images)
-        return images
+        # Build glob pattern
+        if pattern:
+            glob_pattern = os.path.join(dirpath, pattern)
+        else:
+            glob_pattern = os.path.join(dirpath, "*")
+        files = glob.glob(glob_pattern)
+        files = [f for f in files if f.lower().endswith(tuple(extensions))]
+        files = natsort.natsorted(files)
+        skipped_files = []
+        for file in files:
+            try:
+                label_file = os.path.splitext(file)[0] + ".json"
+                if self.output_dir:
+                    label_file_without_path = os.path.basename(label_file)
+                    label_file = os.path.join(self.output_dir, label_file_without_path)
+                item = QtWidgets.QListWidgetItem(file)
+                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)  # type: ignore[attr-defined]
+                if QtCore.QFile.exists(label_file) and LabelFile.is_label_file(label_file):
+                    item.setCheckState(Qt.Checked)  # type: ignore[attr-defined]
+                else:
+                    item.setCheckState(Qt.Unchecked)  # type: ignore[attr-defined]
+                self.fileListWidget.addItem(item)
+            except Exception as e:
+                print(f"[ERROR] Skipping file: {file}\n  Exception: {e}")
+                traceback.print_exc()
+                skipped_files.append(file)
+        if skipped_files:
+            print(f"[WARNING] Skipped {len(skipped_files)} files due to errors:")
+            for f in skipped_files:
+                print(f"  {f}")
+        if load and self.imageList:
+            self.openNextImg()
+        if len(self.imageList) > 1:
+            self.actions.openNextImg.setEnabled(True)  # type: ignore[attr-defined]
+            self.actions.openPrevImg.setEnabled(True)  # type: ignore[attr-defined]
