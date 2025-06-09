@@ -36,6 +36,7 @@ class Canvas(QtWidgets.QWidget):
     vertexSelected = QtCore.pyqtSignal(bool)
     mouseMoved = QtCore.pyqtSignal(QtCore.QPointF)
     zoomRectSelected = QtCore.pyqtSignal(QtCore.QRectF)  # Signal for zoom-to-rectangle
+    zoomFinished = QtCore.pyqtSignal()  # Signal to notify zoom is finished
 
     CREATE, EDIT = 0, 1
 
@@ -560,6 +561,7 @@ class Canvas(QtWidgets.QWidget):
                 rect = QtCore.QRectF(self._zoom_rect_start, self._zoom_rect_end).normalized()
                 if rect.width() > 10 and rect.height() > 10:
                     self.zoomRectSelected.emit(rect)  # Emit the signal for MainWindow
+                    self.zoomFinished.emit()  # Notify that zoom is finished
             self._zoom_rect_start = None
             self._zoom_rect_end = None
             self.zoom_mode = False
