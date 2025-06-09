@@ -848,6 +848,23 @@ class MainWindow(QtWidgets.QMainWindow):
             ai_prompt_action,
         )
 
+        # After other toolbar actions are created, add the zoom rectangle action
+        zoomRectAction = utils.newAction(
+            self,
+            self.tr("Zoom Rectangle"),
+            slot=self.toggleZoomRect,
+            icon="zoom",
+            tip=self.tr("Zoom to rectangle (matplotlib style)"),
+            checkable=True,
+            enabled=True,
+        )
+        self.zoomRectAction = zoomRectAction
+        # Add to toolbar (after zoom controls)
+        if hasattr(self, 'tools'):
+            self.tools.addAction(zoomRectAction)
+        else:
+            self.addToolBar(Qt.TopToolBarArea, QtWidgets.QToolBar()).addAction(zoomRectAction)
+
         self.statusBar().showMessage(str(self.tr("%s started.")) % __appname__)  # type: ignore[union-attr]
         self.statusBar().show()  # type: ignore[union-attr]
 
@@ -2241,3 +2258,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if len(self.imageList) > 1:
             self.actions.openNextImg.setEnabled(True)  # type: ignore[attr-defined]
             self.actions.openPrevImg.setEnabled(True)  # type: ignore[attr-defined]
+    
+    def toggleZoomRect(self, checked):
+        self.canvas.zoom_mode = checked
+        self.canvas._zoom_rect_start = None
+        self.canvas._zoom_rect_end = None
+        self.canvas.setCursor(QtCore.Qt.CrossCursor if checked else QtCore.Qt.ArrowCursor)
+        self.canvas.update()

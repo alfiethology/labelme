@@ -128,6 +128,11 @@ class Canvas(QtWidgets.QWidget):
         self.hold_timer.timeout.connect(self.add_point_under_cursor)
         self.holding_mouse = False
 
+        # --- Zoom to rectangle ---
+        self.zoom_mode = False
+        self._zoom_rect_start = None
+        self._zoom_rect_end = None
+
     def set_ai_model_name(self, model_name: str) -> None:
         logger.debug("Setting AI model to {!r}", model_name)
         self._ai_model_name = model_name
@@ -389,6 +394,12 @@ class Canvas(QtWidgets.QWidget):
         self.movingShape = True  # Save changes
 
     def mousePressEvent(self, ev):
+        if getattr(self, "zoom_mode", False) and ev.button() == QtCore.Qt.LeftButton:
+            self._zoom_rect_start = ev.pos()
+            self._zoom_rect_end = ev.pos()
+            self.update()
+            return
+
         try:
             pos = self.transformPos(ev.localPos())
         except Exception as e:
@@ -536,6 +547,16 @@ class Canvas(QtWidgets.QWidget):
                 self.shapeMoved.emit()
 
             self.movingShape = False
+
+        if self.zoom_mode and ev.button() == QtCore.Qt.LeftButton:
+            if self._zoom_rect_start and self._zoom_rect_end:
+                rect = QtCore.QRectF(self._zoom_rect_start, self._zoom_rect_end).normalized()
+                if rect.width() > 10 and rect.height() > 10:
+                    self.zoomToRect(rect)
+            self._zoom_rect_start = None
+            self._zoom_rect_end = None
+            self.setZoomMode(False)
+            self.update()
 
     def endMove(self, copy):
         assert self.selectedShapes and self.selectedShapesCopy
@@ -780,6 +801,43 @@ class Canvas(QtWidgets.QWidget):
         drawing_shape.selected = True
         drawing_shape.paint(p)
         p.end()
+
+        # Draw zoom rectangle overlay if in zoom mode
+        if self.zoom_mode and self._zoom_rect_start and self._zoom_rect_end:
+            p = QtGui.QPainter(self)
+            p.setPen(QtGui.QPen(QtGui.QColor(0, 120, 215, 180), 2, QtCore.Qt.DashLine))
+            p.setBrush(QtCore.Qt.NoBrush)
+            p.drawRect(QtCore.QRectF(self._zoom_rect_start, self._zoom_rect_end))
+            p.end()
+
+    def zoomToRect(self, rect):
+        # Convert widget rect to image coordinates
+        if self.pixmap is None or self.pixmap.isNull():
+            return
+        s = self.scale
+        offset = self.offsetToCenter()
+        x1 = (rect.left() / s) - offset.x()
+        y1 = (rect.top() / s) - offset.y()
+        x2 = (rect.right() / s) - offset.x()
+        y2 = (rect.bottom() / s) - offset.y()
+        img_rect = QtCore.QRectF(x1, y1, x2 - x1, y2 - y1).normalized()
+        if img_rect.width() < 1 or img_rect.height() < 1:
+            return
+        # Calculate new scale
+        w, h = self.width(), self.height()
+        scale_x = w / img_rect.width()
+        scale_y = h / img_rect.height()
+        new_scale = min(scale_x, scale_y)
+        self.scale = new_scale
+        # Center the selected area
+        cx = (img_rect.left() + img_rect.right()) / 2
+        cy = (img_rect.top() + img_rect.bottom()) / 2
+        px = self.pixmap.width() / 2
+        py = self.pixmap.height() / 2
+        dx = cx - px
+        dy = cy - py
+        # Optionally, you can implement panning here if needed
+        self.update()
 
     def transformPos(self, point):
         """Convert from widget-logical coordinates to painter-logical ones."""
