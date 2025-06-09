@@ -561,7 +561,7 @@ class Canvas(QtWidgets.QWidget):
                     self.zoomToRect(rect)
             self._zoom_rect_start = None
             self._zoom_rect_end = None
-            self.setZoomMode(False)
+            self.zoom_mode = False
             self.update()
 
     def endMove(self, copy):
