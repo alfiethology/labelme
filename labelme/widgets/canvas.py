@@ -35,6 +35,7 @@ class Canvas(QtWidgets.QWidget):
     drawingPolygon = QtCore.pyqtSignal(bool)
     vertexSelected = QtCore.pyqtSignal(bool)
     mouseMoved = QtCore.pyqtSignal(QtCore.QPointF)
+    zoomRectSelected = QtCore.pyqtSignal(QtCore.QRectF)  # Signal for zoom-to-rectangle
 
     CREATE, EDIT = 0, 1
 
@@ -558,7 +559,7 @@ class Canvas(QtWidgets.QWidget):
             if self._zoom_rect_start and self._zoom_rect_end:
                 rect = QtCore.QRectF(self._zoom_rect_start, self._zoom_rect_end).normalized()
                 if rect.width() > 10 and rect.height() > 10:
-                    self.zoomToRect(rect)
+                    self.zoomRectSelected.emit(rect)  # Emit the signal for MainWindow
             self._zoom_rect_start = None
             self._zoom_rect_end = None
             self.zoom_mode = False

@@ -172,7 +172,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.mouseMoved.connect(
             lambda pos: self.status(f"Mouse is at: x={pos.x()}, y={pos.y()}")
         )
-
+        self.canvas.zoomRectSelected.connect(self.zoomToRect)
         scrollArea = QtWidgets.QScrollArea()
         scrollArea.setWidget(self.canvas)
         scrollArea.setWidgetResizable(True)
@@ -2287,3 +2287,29 @@ class MainWindow(QtWidgets.QMainWindow):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def zoomToRect(self, rect):
+        # Convert widget rect to image coordinates
+        s = self.canvas.scale
+        offset = self.canvas.offsetToCenter()
+        x1 = (rect.left() / s) - offset.x()
+        y1 = (rect.top() / s) - offset.y()
+        x2 = (rect.right() / s) - offset.x()
+        y2 = (rect.bottom() / s) - offset.y()
+        img_rect = QtCore.QRectF(x1, y1, x2 - x1, y2 - y1).normalized()
+        if img_rect.width() < 1 or img_rect.height() < 1:
+            return
+        # Get the size of the viewport (visible area)
+        viewport = self.centralWidget().viewport()
+        vw, vh = viewport.width(), viewport.height()
+        # Calculate scale to fit the rect
+        scale_x = vw / img_rect.width()
+        scale_y = vh / img_rect.height()
+        scale = min(scale_x, scale_y)
+        # Set zoom
+        self.setZoom(int(scale * 100))
+        # Center the view on the rect
+        center_x = (img_rect.left() + img_rect.right()) / 2 * scale - vw / 2
+        center_y = (img_rect.top() + img_rect.bottom()) / 2 * scale - vh / 2
+        self.setScroll(Qt.Horizontal, center_x)
+        self.setScroll(Qt.Vertical, center_y)
