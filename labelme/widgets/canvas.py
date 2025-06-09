@@ -222,6 +222,12 @@ class Canvas(QtWidgets.QWidget):
         except AttributeError:
             return
 
+        # --- Zoom rectangle update ---
+        if getattr(self, "zoom_mode", False) and self._zoom_rect_start is not None:
+            self._zoom_rect_end = ev.pos()
+            self.update()
+            return
+
         self.mouseMoved.emit(pos)
 
         self.prevMovePoint = pos
@@ -766,6 +772,13 @@ class Canvas(QtWidgets.QWidget):
 
         if not self.current:
             p.end()
+            # Draw zoom rectangle overlay if in zoom mode
+            if self.zoom_mode and self._zoom_rect_start and self._zoom_rect_end:
+                overlay_painter = QtGui.QPainter(self)
+                overlay_painter.setPen(QtGui.QPen(QtGui.QColor(0, 120, 215, 180), 2, QtCore.Qt.DashLine))
+                overlay_painter.setBrush(QtCore.Qt.NoBrush)
+                overlay_painter.drawRect(QtCore.QRectF(self._zoom_rect_start, self._zoom_rect_end))
+                overlay_painter.end()
             return
 
         if (
@@ -784,6 +797,13 @@ class Canvas(QtWidgets.QWidget):
 
         if self.createMode not in ["ai_polygon", "ai_mask"]:
             p.end()
+            # Draw zoom rectangle overlay if in zoom mode
+            if self.zoom_mode and self._zoom_rect_start and self._zoom_rect_end:
+                overlay_painter = QtGui.QPainter(self)
+                overlay_painter.setPen(QtGui.QPen(QtGui.QColor(0, 120, 215, 180), 2, QtCore.Qt.DashLine))
+                overlay_painter.setBrush(QtCore.Qt.NoBrush)
+                overlay_painter.drawRect(QtCore.QRectF(self._zoom_rect_start, self._zoom_rect_end))
+                overlay_painter.end()
             return
 
         drawing_shape = self.current.copy()
@@ -804,11 +824,11 @@ class Canvas(QtWidgets.QWidget):
 
         # Draw zoom rectangle overlay if in zoom mode
         if self.zoom_mode and self._zoom_rect_start and self._zoom_rect_end:
-            p = QtGui.QPainter(self)
-            p.setPen(QtGui.QPen(QtGui.QColor(0, 120, 215, 180), 2, QtCore.Qt.DashLine))
-            p.setBrush(QtCore.Qt.NoBrush)
-            p.drawRect(QtCore.QRectF(self._zoom_rect_start, self._zoom_rect_end))
-            p.end()
+            overlay_painter = QtGui.QPainter(self)
+            overlay_painter.setPen(QtGui.QPen(QtGui.QColor(0, 120, 215, 180), 2, QtCore.Qt.DashLine))
+            overlay_painter.setBrush(QtCore.Qt.NoBrush)
+            overlay_painter.drawRect(QtCore.QRectF(self._zoom_rect_start, self._zoom_rect_end))
+            overlay_painter.end()
 
     def zoomToRect(self, rect):
         # Convert widget rect to image coordinates

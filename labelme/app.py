@@ -485,6 +485,14 @@ class MainWindow(QtWidgets.QMainWindow):
         zoomLabel.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
         zoomBoxLayout.addWidget(zoomLabel)
         zoomBoxLayout.addWidget(self.zoomWidget)
+
+        # Add a button to activate zoom rectangle mode
+        self.zoomRectButton = QtWidgets.QPushButton(self.tr("Zoom Rectangle"))
+        self.zoomRectButton.setCheckable(True)
+        self.zoomRectButton.setToolTip(self.tr("Activate zoom rectangle mode (shortcut: Z)"))
+        self.zoomRectButton.clicked.connect(self.toggleZoomRect)
+        zoomBoxLayout.addWidget(self.zoomRectButton)
+
         zoom.setDefaultWidget(QtWidgets.QWidget())
         zoom.defaultWidget().setLayout(zoomBoxLayout)  # type: ignore[union-attr]
         self.zoomWidget.setWhatsThis(
@@ -2075,7 +2083,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.errorMessage(
                 "No objects labeled",
                 "You must label at least one object to save the file.",
-            )
+                                             )
             return False
         return True
 
@@ -2259,9 +2267,23 @@ class MainWindow(QtWidgets.QMainWindow):
             self.actions.openNextImg.setEnabled(True)  # type: ignore[attr-defined]
             self.actions.openPrevImg.setEnabled(True)  # type: ignore[attr-defined]
     
-    def toggleZoomRect(self, checked):
+    def toggleZoomRect(self, checked=None):
+        # Support both button and programmatic toggling
+        if checked is None:
+            checked = not self.canvas.zoom_mode
         self.canvas.zoom_mode = checked
         self.canvas._zoom_rect_start = None
         self.canvas._zoom_rect_end = None
         self.canvas.setCursor(QtCore.Qt.CrossCursor if checked else QtCore.Qt.ArrowCursor)
         self.canvas.update()
+        # Sync button state if present
+        if hasattr(self, 'zoomRectButton'):
+            self.zoomRectButton.setChecked(checked)
+
+    def keyPressEvent(self, event):
+        # Allow 'z' key to toggle zoom rectangle mode
+        if event.key() == QtCore.Qt.Key_Z:
+            self.toggleZoomRect(not self.canvas.zoom_mode)
+            event.accept()
+            return
+        super().keyPressEvent(event)
