@@ -400,10 +400,9 @@ class Canvas(QtWidgets.QWidget):
         self.movingShape = True  # Save changes
 
     def mousePressEvent(self, ev):
-        if getattr(self, "zoom_mode", False) and ev.button() == QtCore.Qt.LeftButton:
+        if self.zoom_mode and ev.button() == QtCore.Qt.LeftButton:
             self._zoom_rect_start = ev.pos()
-            self._zoom_rect_end = ev.pos()
-            self.update()
+            self._zoom_rect_end = None
             return
 
         try:
@@ -528,6 +527,49 @@ class Canvas(QtWidgets.QWidget):
             self.holding_mouse = False
             self.hold_timer.stop()
 
+        if self.zoom_mode and ev.button() == QtCore.Qt.LeftButton:
+            if self._zoom_rect_start and self._zoom_rect_end:
+                x1, y1 = self._zoom_rect_start.x(), self._zoom_rect_start.y()
+                x2, y2 = self._zoom_rect_end.x(), self._zoom_rect_end.y()
+                left, right = sorted([x1, x2])
+                top, bottom = sorted([y1, y2])
+                rect = QtCore.QRectF(left, top, right - left, bottom - top)
+                if rect.width() > 1 and rect.height() > 1:
+                    # Compute new scale
+                    scale_x = self.width() / rect.width()
+                    scale_y = self.height() / rect.height()
+                    new_scale = min(scale_x, scale_y)
+                    # Center of selected rectangle in widget coords
+                    center_widget = QtCore.QPointF(rect.center())
+                    # Map to image coords (before zoom)
+                    if self.pixmap and not self.pixmap.isNull():
+                        # Assume self.offsets is (offset_x, offset_y) for pan
+                        offset_x, offset_y = self.offsets
+                        # Current scale
+                        old_scale = self.scale
+                        # Center in image coords
+                        center_img_x = (center_widget.x() - offset_x) / old_scale
+                        center_img_y = (center_widget.y() - offset_y) / old_scale
+                        # After zoom, want this image point to be at center of widget
+                        widget_cx = self.width() / 2
+                        widget_cy = self.height() / 2
+                        # New offsets
+                        new_offset_x = widget_cx - center_img_x * new_scale
+                        new_offset_y = widget_cy - center_img_y * new_scale
+                        self.offsets = QtCore.QPoint(new_offset_x, new_offset_y)
+                        self.scale = new_scale
+                    else:
+                        self.scale = new_scale
+                self.repaint()
+                self.zoom_mode = False
+                self._zoom_rect_start = self._zoom_rect_end = None
+                return
+            self._zoom_rect_start = None
+            self._zoom_rect_end = None
+            self.zoom_mode = False
+            self.update()
+            return
+
         if ev.button() == QtCore.Qt.RightButton:  # type: ignore[attr-defined]
             menu = self.menus[len(self.selectedShapesCopy) > 0]
             self.restoreCursor()
@@ -556,9 +598,41 @@ class Canvas(QtWidgets.QWidget):
 
         if self.zoom_mode and ev.button() == QtCore.Qt.LeftButton:
             if self._zoom_rect_start and self._zoom_rect_end:
-                rect = QtCore.QRectF(self._zoom_rect_start, self._zoom_rect_end).normalized()
-                if rect.width() > 10 and rect.height() > 10:
-                    self.zoomToRect(rect)
+                x1, y1 = self._zoom_rect_start.x(), self._zoom_rect_start.y()
+                x2, y2 = self._zoom_rect_end.x(), self._zoom_rect_end.y()
+                left, right = sorted([x1, x2])
+                top, bottom = sorted([y1, y2])
+                rect = QtCore.QRectF(left, top, right - left, bottom - top)
+                if rect.width() > 1 and rect.height() > 1:
+                    # Compute new scale
+                    scale_x = self.width() / rect.width()
+                    scale_y = self.height() / rect.height()
+                    new_scale = min(scale_x, scale_y)
+                    # Center of selected rectangle in widget coords
+                    center_widget = QtCore.QPointF(rect.center())
+                    # Map to image coords (before zoom)
+                    if self.pixmap and not self.pixmap.isNull():
+                        # Assume self.offsets is (offset_x, offset_y) for pan
+                        offset_x, offset_y = self.offsets
+                        # Current scale
+                        old_scale = self.scale
+                        # Center in image coords
+                        center_img_x = (center_widget.x() - offset_x) / old_scale
+                        center_img_y = (center_widget.y() - offset_y) / old_scale
+                        # After zoom, want this image point to be at center of widget
+                        widget_cx = self.width() / 2
+                        widget_cy = self.height() / 2
+                        # New offsets
+                        new_offset_x = widget_cx - center_img_x * new_scale
+                        new_offset_y = widget_cy - center_img_y * new_scale
+                        self.offsets = QtCore.QPoint(new_offset_x, new_offset_y)
+                        self.scale = new_scale
+                    else:
+                        self.scale = new_scale
+                self.repaint()
+                self.zoom_mode = False
+                self._zoom_rect_start = self._zoom_rect_end = None
+                return
             self._zoom_rect_start = None
             self._zoom_rect_end = None
             self.zoom_mode = False
@@ -1106,6 +1180,13 @@ class Canvas(QtWidgets.QWidget):
             self.current.addPoint(pos)
             self.line[0] = self.current[-1]
             self.update()
+
+    def setZoomMode(self, enabled: bool):
+        self.zoom_mode = enabled
+        self.setCursor(QtCore.Qt.CrossCursor if enabled else CURSOR_DEFAULT)
+        self._zoom_rect_start = None
+        self._zoom_rect_end = None
+        self.update()
 
 
 def _update_shape_with_sam(

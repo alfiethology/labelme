@@ -481,9 +481,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         zoom = QtWidgets.QWidgetAction(self)
         zoomBoxLayout = QtWidgets.QVBoxLayout()
-        zoomLabel = QtWidgets.QLabel(self.tr("Zoom"))
-        zoomLabel.setAlignment(Qt.AlignCenter)  # type: ignore[attr-defined]
-        zoomBoxLayout.addWidget(zoomLabel)
+        # Replace Zoom label with a button to toggle zoom mode
+        self.zoomButton = QtWidgets.QPushButton("Zoom")
+        self.zoomButton.setCheckable(True)
+        self.zoomButton.clicked.connect(self.toggleZoomMode)
+        zoomBoxLayout.addWidget(self.zoomButton)
         zoomBoxLayout.addWidget(self.zoomWidget)
 
         # Add a button to activate zoom rectangle mode
@@ -2279,6 +2281,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Sync button state if present
         if hasattr(self, 'zoomRectButton'):
             self.zoomRectButton.setChecked(checked)
+
+    def toggleZoomMode(self, checked):
+        self.canvas.setZoomMode(checked)
 
     def keyPressEvent(self, event):
         # Allow 'z' key to toggle zoom rectangle mode
