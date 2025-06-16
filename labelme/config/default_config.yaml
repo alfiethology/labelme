@@ -65,8 +65,8 @@ fit_to_content:
 # canvas
 epsilon: 10.0
 canvas:
-  fill_drawing: true
-  fill_editing: true
+  fill_drawing: false
+  fill_editing: false
   # None: do nothing
   # close: close polygon
   double_click: close
