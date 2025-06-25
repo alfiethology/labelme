@@ -471,6 +471,11 @@ class Canvas(QtWidgets.QWidget):
                         else self.createMode
                     )
                     self.current.addPoint(pos, label=0 if is_shift_pressed else 1)
+                    # --- Ensure crosshair appears immediately for rectangle ---
+                    if self.createMode == "rectangle":
+                        self.prevMovePoint = pos
+                        self.repaint()
+                    # --- End of change ---
                     if self.createMode == "point":
                         self.finalise()
                     elif (
@@ -737,12 +742,16 @@ class Canvas(QtWidgets.QWidget):
 
         # draw crosshair
         if (
-            self._crosshair[self._createMode]
-            and self.drawing()
-            and self.prevMovePoint
-            and not self.outOfPixmap(self.prevMovePoint)
+            (self.createMode == "rectangle" and self.drawing() and self.prevMovePoint and not self.outOfPixmap(self.prevMovePoint))
+            or (self._crosshair[self.createMode] and self.drawing() and self.prevMovePoint and not self.outOfPixmap(self.prevMovePoint))
         ):
-            p.setPen(QtGui.QColor(0, 0, 0))
+            if self.createMode == "rectangle":
+                pen = QtGui.QPen(QtGui.QColor(0, 0, 0))
+                pen.setStyle(QtCore.Qt.DotLine)
+                pen.setWidth(2)  # Thicker crosshair lines
+                p.setPen(pen)
+            else:
+                p.setPen(QtGui.QColor(0, 0, 0))
             p.drawLine(
                 0,
                 int(self.prevMovePoint.y() * self.scale),
@@ -1109,6 +1118,14 @@ class Canvas(QtWidgets.QWidget):
             self.current.addPoint(pos)
             self.line[0] = self.current[-1]
             self.update()
+
+    @property
+    def createMode(self):
+        return self._createMode
+
+    @createMode.setter
+    def createMode(self, value):
+        self._createMode = value
 
 
 def _update_shape_with_sam(
