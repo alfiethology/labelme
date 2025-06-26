@@ -873,6 +873,14 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.addToolBar(Qt.TopToolBarArea, QtWidgets.QToolBar()).addAction(zoomRectAction)
 
+        # --- Make zoom rectangle button auto-unclick after use ---
+        def handle_zoom_rect_finished():
+            if hasattr(self, 'zoomRectButton'):
+                self.zoomRectButton.setChecked(False)
+            if hasattr(self, 'zoomRectAction'):
+                self.zoomRectAction.setChecked(False)
+        self.canvas.zoomFinished.connect(handle_zoom_rect_finished)
+
         self.statusBar().showMessage(str(self.tr("%s started.")) % __appname__)  # type: ignore[union-attr]
         self.statusBar().show()  # type: ignore[union-attr]
 
