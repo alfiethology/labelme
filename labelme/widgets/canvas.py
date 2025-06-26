@@ -795,7 +795,7 @@ class Canvas(QtWidgets.QWidget):
                 overlay_painter.scale(self.scale, self.scale)
                 overlay_painter.translate(self.offsetToCenter())
                 green_brush = QtGui.QBrush(QtGui.QColor(210, 210, 0))
-                dot_radius = 4  # Increased dot size
+                dot_radius = 3  # Increased dot size
                 for shape in self.shapes:
                     # Draw center dot for all rectangles and polygons, regardless of visibility
                     if shape.shape_type in ["rectangle", "polygon"] and len(shape.points) > 0:
