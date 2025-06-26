@@ -134,6 +134,8 @@ class Canvas(QtWidgets.QWidget):
         self.zoom_mode = False
         self._zoom_rect_start = None
         self._zoom_rect_end = None
+        # --- Center dots toggle ---
+        self.showCenterDots = False  # New property for View menu toggle
 
     def set_ai_model_name(self, model_name: str) -> None:
         logger.debug("Setting AI model to {!r}", model_name)
@@ -784,6 +786,27 @@ class Canvas(QtWidgets.QWidget):
 
         if not self.current:
             p.end()
+            # Draw green center dots for rectangles and polygons if toggled on
+            if self.showCenterDots:
+                overlay_painter = QtGui.QPainter(self)
+                overlay_painter.setRenderHint(QtGui.QPainter.Antialiasing)
+                overlay_painter.setRenderHint(QtGui.QPainter.HighQualityAntialiasing)
+                overlay_painter.setRenderHint(QtGui.QPainter.SmoothPixmapTransform)
+                overlay_painter.scale(self.scale, self.scale)
+                overlay_painter.translate(self.offsetToCenter())
+                green_brush = QtGui.QBrush(QtGui.QColor(210, 210, 0))
+                dot_radius = 4  # Increased dot size
+                for shape in self.shapes:
+                    # Draw center dot for all rectangles and polygons, regardless of visibility
+                    if shape.shape_type in ["rectangle", "polygon"] and len(shape.points) > 0:
+                        xs = [pt.x() for pt in shape.points]
+                        ys = [pt.y() for pt in shape.points]
+                        cx = sum(xs) / len(xs)
+                        cy = sum(ys) / len(ys)
+                        overlay_painter.setBrush(green_brush)
+                        overlay_painter.setPen(QtCore.Qt.NoPen)
+                        overlay_painter.drawEllipse(QtCore.QPointF(cx, cy), dot_radius, dot_radius)
+                overlay_painter.end()
             # Draw zoom rectangle overlay if in zoom mode
             if self.zoom_mode and self._zoom_rect_start and self._zoom_rect_end:
                 overlay_painter = QtGui.QPainter(self)
@@ -1126,6 +1149,10 @@ class Canvas(QtWidgets.QWidget):
     @createMode.setter
     def createMode(self, value):
         self._createMode = value
+
+    def setShowCenterDots(self, value: bool):
+        self.showCenterDots = value
+        self.update()
 
 
 def _update_shape_with_sam(

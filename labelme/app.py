@@ -626,6 +626,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelList.setContextMenuPolicy(Qt.CustomContextMenu)  # type: ignore[attr-defined]
         self.labelList.customContextMenuRequested.connect(self.popLabelListMenu)
 
+        # --- Center dots toggle action ---
+        showCenterDotsAction = action(
+            self.tr("Show Center Dots"),
+            slot=None,  # We'll connect it below
+            icon=None,
+            tip=self.tr("Show green center dots for rectangles and polygons"),
+            checkable=True,
+            enabled=True,
+        )
+        showCenterDotsAction.setChecked(False)
+        def onShowCenterDotsToggled(checked):
+            self.canvas.setShowCenterDots(checked)
+        showCenterDotsAction.toggled.connect(onShowCenterDotsToggled)
+        self.showCenterDotsAction = showCenterDotsAction
+
         # Store actions for further handling.
         self.actions = utils.struct(  # type: ignore[assignment,method-assign]
             saveAuto=saveAuto,
@@ -764,6 +779,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 showAll,
                 toggleAll,
                 None,
+                showCenterDotsAction,  # Insert our new action here
                 zoomIn,
                 zoomOut,
                 zoomOrg,
