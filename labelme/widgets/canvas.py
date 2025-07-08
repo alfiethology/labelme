@@ -44,6 +44,10 @@ class Canvas(QtWidgets.QWidget):
     _createMode = "polygon"
 
     _fill_drawing = False
+
+    prevPoint: QtCore.QPointF
+    prevMovePoint: QtCore.QPointF
+    offsets: tuple[QtCore.QPointF, QtCore.QPointF]
     _fill_editing = False
 
     def fillDrawing(self):
@@ -95,9 +99,9 @@ class Canvas(QtWidgets.QWidget):
         #   - createMode == 'line': the line
         #   - createMode == 'point': the point
         self.line = Shape()
-        self.prevPoint = QtCore.QPoint()
-        self.prevMovePoint = QtCore.QPoint()
-        self.offsets = QtCore.QPoint(), QtCore.QPoint()
+        self.prevPoint = QtCore.QPointF()
+        self.prevMovePoint = QtCore.QPointF()
+        self.offsets = QtCore.QPointF(), QtCore.QPointF()
         self.scale = 1.0
         self.pixmap = QtGui.QPixmap()
         self.visible = {}
@@ -404,6 +408,7 @@ class Canvas(QtWidgets.QWidget):
         self.movingShape = True  # Save changes
 
     def mousePressEvent(self, ev):
+        pos: QtCore.QPointF = self.transformPos(ev.localPos())
         if getattr(self, "zoom_mode", False) and ev.button() == QtCore.Qt.LeftButton:
             self._zoom_rect_start = ev.pos()
             self._zoom_rect_end = ev.pos()
@@ -645,7 +650,7 @@ class Canvas(QtWidgets.QWidget):
                     return
         self.deSelectShape()
 
-    def calculateOffsets(self, point):
+    def calculateOffsets(self, point: QtCore.QPointF) -> None:
         left = self.pixmap.width() - 1
         right = 0
         top = self.pixmap.height() - 1
@@ -665,6 +670,7 @@ class Canvas(QtWidgets.QWidget):
         y1 = top - point.y()
         x2 = right - point.x()
         y2 = bottom - point.y()
+        self.offsets = QtCore.QPointF(x1, y1), QtCore.QPointF(x2, y2)
         self.offsets = QtCore.QPoint(int(x1), int(y1)), QtCore.QPoint(int(x2), int(y2))
 
     def boundedMoveVertex(self, pos):
@@ -857,6 +863,7 @@ class Canvas(QtWidgets.QWidget):
         drawing_shape.paint(p)
         p.end()
 
+    def transformPos(self, point: QtCore.QPointF) -> QtCore.QPointF:
         # Draw zoom rectangle overlay if in zoom mode
         if self.zoom_mode and self._zoom_rect_start and self._zoom_rect_end:
             overlay_painter = QtGui.QPainter(self)
@@ -898,7 +905,7 @@ class Canvas(QtWidgets.QWidget):
         """Convert from widget-logical coordinates to painter-logical ones."""
         return point / self.scale - self.offsetToCenter()
 
-    def offsetToCenter(self):
+    def offsetToCenter(self) -> QtCore.QPointF:
         s = self.scale
         area = super(Canvas, self).size()
         w, h = self.pixmap.width() * s, self.pixmap.height() * s
