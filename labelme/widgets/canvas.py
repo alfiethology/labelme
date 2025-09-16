@@ -929,12 +929,38 @@ class Canvas(QtWidgets.QWidget):
             )
         self.current.close()
 
+        # Append the shape first so it becomes the latest entry
         self.shapes.append(self.current)
+
+        # If creating a point, auto-assign the last used label/flags ("class")
+        # so a single click creates and saves the point without prompting.
+        if self.createMode == "point":
+            last_label, last_flags = self._get_last_label_and_flags()
+            if last_label:
+                try:
+                    self.shapes[-1].label = last_label
+                    # Default to empty dict if flags are None
+                    self.shapes[-1].flags = last_flags or {}
+                except Exception as e:
+                    logger.error(f"Failed to set last label/flags on point: {e}")
         self.storeShapes()
         self.current = None
         self.setHiding(False)
         self.newShape.emit()
         self.update()
+
+    def _get_last_label_and_flags(self):
+        """Return (label, flags) from the most recently saved shape with a label.
+
+        If no prior labeled shape exists, returns (None, None).
+        """
+        for s in reversed(self.shapes[:-1] if self.current else self.shapes):
+            # Use getattr to be safe if shape doesn't expose attributes
+            label = getattr(s, "label", None)
+            if label:
+                flags = getattr(s, "flags", {})
+                return label, flags
+        return None, None
 
     def closeEnough(self, p1, p2):
         # d = distance(p1 - p2)

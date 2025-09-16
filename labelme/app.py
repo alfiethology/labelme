@@ -1575,8 +1575,33 @@ class MainWindow(QtWidgets.QMainWindow):
         flags = {}
         group_id = None
         description = ""
-        if self._config["display_label_popup"] or not text:
-            previous_text = self.labelDialog.edit.text()
+
+        # Capture previous input from label dialog as a "last used" fallback
+        previous_text = self.labelDialog.edit.text()
+
+        # Determine if we should suppress the popup for point creation
+        suppress_popup = False
+        last_shape = self.canvas.shapes[-1] if self.canvas.shapes else None
+        if self.canvas.createMode == "point":
+            # Priority for auto label: quick-list selection > label already on shape > previous dialog text
+            candidate = text or (
+                getattr(last_shape, "label", None) if last_shape else None
+            ) or (previous_text if previous_text else None)
+            # If still no candidate, scan previous shapes for last used label
+            if not candidate and len(self.canvas.shapes) >= 1:
+                for s in reversed(self.canvas.shapes[:-1]):
+                    cand = getattr(s, "label", None)
+                    if cand:
+                        candidate = cand
+                        break
+            if candidate:
+                suppress_popup = True
+                text = candidate
+                # Adopt flags from shape if available; else keep empty {}
+                if last_shape and getattr(last_shape, "label", None) == candidate:
+                    flags = getattr(last_shape, "flags", {}) or {}
+
+        if (self._config["display_label_popup"] or not text) and not suppress_popup:
             text, flags, group_id, description = self.labelDialog.popUp(text)
             if not text:
                 self.labelDialog.edit.setText(previous_text)
@@ -1591,6 +1616,7 @@ class MainWindow(QtWidgets.QMainWindow):
             text = ""
         if text:
             self.labelList.clearSelection()
+            # Ensure the just-created shape has the chosen label/flags
             shape = self.canvas.setLastLabel(text, flags)
             shape.group_id = group_id
             shape.description = description
