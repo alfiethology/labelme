@@ -186,6 +186,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.shapeMoved.connect(self.setDirty)
         self.canvas.selectionChanged.connect(self.shapeSelectionChanged)
         self.canvas.drawingPolygon.connect(self.toggleDrawingSensitive)
+        self.uniqLabelList.itemChanged.connect(self.uniqueLabelItemChanged)
 
         self.setCentralWidget(scrollArea)
 
@@ -1556,6 +1557,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def labelItemChanged(self, item):
         shape = item.shape()
         self.canvas.setShapeVisible(shape, item.checkState() == Qt.Checked)  # type: ignore[attr-defined]
+
+    def uniqueLabelItemChanged(self, item):
+        label = item.data(Qt.UserRole)  # type: ignore[attr-defined]
+        self.canvas.setLabelVisible(label, item.checkState() == Qt.Checked)  # type: ignore[attr-defined]
 
     def labelOrderChanged(self):
         self.setDirty()

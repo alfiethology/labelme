@@ -105,6 +105,7 @@ class Canvas(QtWidgets.QWidget):
         self.scale = 1.0
         self.pixmap = QtGui.QPixmap()
         self.visible = {}
+        self.label_visible = {}
         self._hideBackround = False
         self.hideBackround = False
         self.hShape = None
@@ -190,7 +191,9 @@ class Canvas(QtWidgets.QWidget):
         self.restoreCursor()
 
     def isVisible(self, shape):  # type: ignore[override]
-        return self.visible.get(shape, True)
+        return self.visible.get(shape, True) and self.label_visible.get(
+            shape.label, True
+        )
 
     def drawing(self):
         return self.mode == self.CREATE
@@ -803,8 +806,11 @@ class Canvas(QtWidgets.QWidget):
                 green_brush = QtGui.QBrush(QtGui.QColor(210, 210, 0))
                 dot_radius = 3  # Increased dot size
                 for shape in self.shapes:
-                    # Draw center dot for all rectangles and polygons, regardless of visibility
-                    if shape.shape_type in ["rectangle", "polygon"] and len(shape.points) > 0:
+                    if (
+                        self.isVisible(shape)
+                        and shape.shape_type in ["rectangle", "polygon"]
+                        and len(shape.points) > 0
+                    ):
                         xs = [pt.x() for pt in shape.points]
                         ys = [pt.y() for pt in shape.points]
                         cx = sum(xs) / len(xs)
@@ -1141,6 +1147,19 @@ class Canvas(QtWidgets.QWidget):
 
     def setShapeVisible(self, shape, value):
         self.visible[shape] = value
+        self.update()
+
+    def setLabelVisible(self, label, value):
+        self.label_visible[label] = value
+        if self.hShape is not None and self.hShape.label == label and not value:
+            self.unHighlight()
+        if not value:
+            selected_shapes = [
+                shape for shape in self.selectedShapes if self.isVisible(shape)
+            ]
+            if len(selected_shapes) != len(self.selectedShapes):
+                self.setHiding(False)
+                self.selectionChanged.emit(selected_shapes)
         self.update()
 
     def overrideCursor(self, cursor):
