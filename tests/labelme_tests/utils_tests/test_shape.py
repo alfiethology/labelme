@@ -1,4 +1,6 @@
 from labelme.utils import shape as shape_module
+from labelme.shape import Shape
+from PyQt5 import QtCore
 
 from .util import get_img_and_data
 
@@ -22,3 +24,11 @@ def test_shape_to_mask():
         points = shape["points"]
         mask = shape_module.shape_to_mask(img.shape[:2], points)
         assert mask.shape == img.shape[:2]
+
+
+def test_point_shape_contains_click_area():
+    shape = Shape(shape_type="point")
+    shape.addPoint(QtCore.QPointF(10, 10))
+
+    assert shape.containsPoint(QtCore.QPointF(10, 10))
+    assert not shape.containsPoint(QtCore.QPointF(100, 100))

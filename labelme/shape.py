@@ -336,6 +336,11 @@ class Shape(object):
                 self.mask.shape[1] - 1,
             )
             return self.mask[y, x]
+        if self.shape_type == "point":
+            if not self.points:
+                return False
+            radius = self.point_size / (2.0 * self.scale)
+            return labelme.utils.distance(point - self.points[0]) <= radius
         return self.makePath().contains(point)
 
     def makePath(self):
@@ -348,6 +353,11 @@ class Shape(object):
             if len(self.points) == 2:
                 raidus = labelme.utils.distance(self.points[0] - self.points[1])
                 path.addEllipse(self.points[0], raidus, raidus)
+        elif self.shape_type == "point":
+            path = QtGui.QPainterPath()
+            if self.points:
+                radius = self.point_size / (2.0 * self.scale)
+                path.addEllipse(self.points[0], radius, radius)
         else:
             path = QtGui.QPainterPath(self.points[0])
             for p in self.points[1:]:

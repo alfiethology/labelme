@@ -2181,9 +2181,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config["keep_prev"] = not self._config["keep_prev"]
 
     def removeSelectedPoint(self):
-        self.canvas.removeSelectedPoint()
+        deleted_shape = self.canvas.removeSelectedPoint()
         self.canvas.update()
-        if not self.canvas.hShape.points:  # type: ignore[union-attr]
+        if deleted_shape is not None:
+            self.remLabels([deleted_shape])
+            if self.noShapes():
+                for action in self.actions.onShapesPresent:  # type: ignore[attr-defined]
+                    action.setEnabled(False)
+        elif self.canvas.hShape is not None and not self.canvas.hShape.points:
             self.canvas.deleteShape(self.canvas.hShape)
             self.remLabels([self.canvas.hShape])
             if self.noShapes():

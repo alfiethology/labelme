@@ -403,12 +403,21 @@ class Canvas(QtWidgets.QWidget):
         shape = self.prevhShape
         index = self.prevhVertex
         if shape is None or index is None:
-            return
+            return None
+        if shape.shape_type == "point":
+            shape.highlightClear()
+            self.deleteShape(shape)
+            self.hShape = self.prevhShape = None
+            self.hVertex = self.prevhVertex = None
+            self.hEdge = self.prevhEdge = None
+            self.movingShape = False
+            return shape
         shape.removePoint(index)
         shape.highlightClear()
         self.hShape = shape
         self.prevhVertex = None
         self.movingShape = True  # Save changes
+        return None
 
     def mousePressEvent(self, ev):
         pos: QtCore.QPointF = self.transformPos(ev.localPos())
@@ -635,6 +644,18 @@ class Canvas(QtWidgets.QWidget):
             index, shape = self.hVertex, self.hShape
             if shape is not None and index is not None:
                 shape.highlightVertex(index, shape.MOVE_VERTEX)  # type: ignore[union-attr]
+                if shape.shape_type == "point":
+                    self.setHiding()
+                    if shape not in self.selectedShapes:
+                        if multiple_selection_mode:
+                            self.selectionChanged.emit(self.selectedShapes + [shape])
+                        else:
+                            self.selectionChanged.emit([shape])
+                        self.hShapeIsSelected = False
+                    else:
+                        self.hShapeIsSelected = True
+                    self.calculateOffsets(point)
+                    return
             else:
                 logger.warning("selectShapePoint: No valid shape or vertex to highlight.")
         else:
