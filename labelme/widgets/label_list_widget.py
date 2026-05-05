@@ -1,4 +1,13 @@
+from __future__ import annotations
+
+import html
+from collections.abc import Iterator
+from typing import TYPE_CHECKING
+from typing import NamedTuple
 from typing import cast
+
+if TYPE_CHECKING:
+    from labelme.shape import Shape
 
 from PyQt5 import QtCore
 from PyQt5 import QtGui
@@ -8,176 +17,268 @@ from PyQt5.QtGui import QPalette
 from PyQt5.QtWidgets import QStyle
 
 
-# https://stackoverflow.com/a/2039745/4158863
+def format_label_with_color_dot(text: str, color: tuple[int, int, int]) -> str:
+    r, g, b = color
+    return f'{html.escape(text)} <font color="#{r:02x}{g:02x}{b:02x}">●</font>'
+
+
+def format_shape_label(shape: Shape) -> str:
+    assert shape.label is not None
+    if shape.group_id is None:
+        text = shape.label
+    else:
+        text = f"{shape.label} ({shape.group_id})"
+    return format_label_with_color_dot(text=text, color=shape.fill_color.getRgb()[:3])
+
+
 class HTMLDelegate(QtWidgets.QStyledItemDelegate):
-    def __init__(self, parent=None):
-        super(HTMLDelegate, self).__init__()
-        self.doc = QtGui.QTextDocument(self)
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
 
-    def paint(self, painter, option, index):
-        painter.save()
+    def paint(
+        self,
+        painter: QtGui.QPainter,
+        option: QtWidgets.QStyleOptionViewItem,
+        index: QtCore.QModelIndex,
+    ) -> None:
+        opt = QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
 
-        options = QtWidgets.QStyleOptionViewItem(option)
+        html = opt.text
+        opt.text = ""
 
-        self.initStyleOption(options, index)
-        self.doc.setHtml(options.text)
-        options.text = ""
-
-        style = (
-            QtWidgets.QApplication.style()
-            if options.widget is None
-            else options.widget.style()
+        widget_style = (
+            opt.widget.style() if opt.widget else QtWidgets.QApplication.style()
         )
-        style.drawControl(QStyle.CE_ItemViewItem, options, painter)  # type: ignore[attr-defined,union-attr]
+        widget_style.drawControl(QStyle.CE_ItemViewItem, opt, painter)
 
-        ctx = QtGui.QAbstractTextDocumentLayout.PaintContext()
-
-        if option.state & QStyle.State_Selected:  # type: ignore[attr-defined]
-            ctx.palette.setColor(
-                QPalette.Text,
-                option.palette.color(QPalette.Active, QPalette.HighlightedText),
-            )
+        doc = QtGui.QTextDocument()
+        if opt.state & QStyle.State_Selected:
+            text_color = opt.palette.color(QPalette.Active, QPalette.HighlightedText)
         else:
-            ctx.palette.setColor(
-                QPalette.Text,
-                option.palette.color(QPalette.Active, QPalette.Text),
-            )
+            text_color = opt.palette.color(QPalette.Active, QPalette.Text)
+        doc.setDefaultStyleSheet(f"body {{ color: {text_color.name()}; }}")
+        doc.setHtml(f"<body>{html}</body>")
 
-        textRect = style.subElementRect(QStyle.SE_ItemViewItemText, options)  # type: ignore[attr-defined,union-attr]
-
+        text_rect = widget_style.subElementRect(QStyle.SE_ItemViewItemText, opt)
         if index.column() != 0:
-            textRect.adjust(5, 0, 0, 0)
+            text_rect.adjust(5, 0, 0, 0)
 
-        thefuckyourshitup_constant = 4
-        margin = (option.rect.height() - options.fontMetrics.height()) // 2
-        margin = margin - thefuckyourshitup_constant
-        textRect.setTop(textRect.top() + margin)
+        VERT_FUDGE = 4
+        margin = (option.rect.height() - opt.fontMetrics.height()) // 2 - VERT_FUDGE
+        text_rect.setTop(text_rect.top() + margin)
 
-        painter.translate(textRect.topLeft())
-        painter.setClipRect(textRect.translated(-textRect.topLeft()))
-        self.doc.documentLayout().draw(painter, ctx)  # type: ignore[union-attr]
-
+        painter.save()
+        painter.translate(text_rect.topLeft())
+        painter.setClipRect(text_rect.translated(-text_rect.topLeft()))
+        doc.drawContents(painter)
         painter.restore()
 
-    def sizeHint(self, option, index):
-        thefuckyourshitup_constant = 4
-        return QtCore.QSize(
-            int(self.doc.idealWidth()),
-            int(self.doc.size().height() - thefuckyourshitup_constant),
-        )
+    def sizeHint(
+        self,
+        option: QtWidgets.QStyleOptionViewItem | None,
+        index: QtCore.QModelIndex | None,
+    ) -> QtCore.QSize:
+        VERT_FUDGE = 4
+        if option is not None and index is not None:
+            opt = QtWidgets.QStyleOptionViewItem(option)
+            self.initStyleOption(opt, index)
+            doc = QtGui.QTextDocument()
+            doc.setHtml(opt.text)
+            height = int(doc.size().height()) - VERT_FUDGE
+            return QtCore.QSize(int(doc.idealWidth()), height)
+        doc = QtGui.QTextDocument()
+        height = int(doc.size().height()) - VERT_FUDGE
+        return QtCore.QSize(int(doc.idealWidth()), height)
 
 
 class LabelListWidgetItem(QtGui.QStandardItem):
-    def __init__(self, text=None, shape=None):
-        super(LabelListWidgetItem, self).__init__()
+    def __init__(self, text: str | None = None, shape: Shape | None = None) -> None:
+        super().__init__()
         self.setText(text or "")
-        self.setShape(shape)
+        self.set_shape(shape)
 
         self.setCheckable(True)
-        self.setCheckState(Qt.Checked)  # type: ignore[attr-defined]
+        self.setCheckState(
+            Qt.Checked if shape is None or shape.visible else Qt.Unchecked
+        )
         self.setEditable(False)
-        self.setTextAlignment(Qt.AlignBottom)  # type: ignore[attr-defined]
+        self.setTextAlignment(Qt.AlignBottom)
 
-    def clone(self):
+    def clone(self) -> LabelListWidgetItem:
         return LabelListWidgetItem(self.text(), self.shape())
 
-    def setShape(self, shape):
-        self.setData(shape, Qt.UserRole)  # type: ignore[attr-defined]
+    def set_shape(self, shape: Shape | None) -> None:
+        self.setData(shape, Qt.UserRole)
 
-    def shape(self):
-        return self.data(Qt.UserRole)  # type: ignore[attr-defined]
+    def shape(self) -> Shape | None:
+        return self.data(Qt.UserRole)
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return id(self)
 
-    def __repr__(self):
-        return '{}("{}")'.format(self.__class__.__name__, self.text())
+    def __repr__(self) -> str:
+        return f'{self.__class__.__name__}("{self.text()}")'
 
 
-class StandardItemModel(QtGui.QStandardItemModel):
-    itemDropped = QtCore.pyqtSignal()
+class _ItemModel(QtGui.QStandardItemModel):
+    item_dropped = QtCore.pyqtSignal()
 
-    def removeRows(self, *args, **kwargs):
-        ret = super().removeRows(*args, **kwargs)
-        self.itemDropped.emit()
+    def removeRows(
+        self,
+        row: int,
+        count: int,
+        parent: QtCore.QModelIndex = QtCore.QModelIndex(),
+    ) -> bool:
+        ret = super().removeRows(row, count, parent)
+        self.item_dropped.emit()
         return ret
+
+    def dropMimeData(
+        self,
+        data: QtCore.QMimeData,
+        action: Qt.DropAction,
+        row: int,
+        column: int,
+        parent: QtCore.QModelIndex,
+    ) -> bool:
+        # NOTE: By default, PyQt will overwrite items when dropped on them, so we need
+        # to adjust the row/parent to insert after the item instead.
+
+        # If row is -1, we're dropping on an item (which would overwrite)
+        # Instead, we want to insert after it
+        if row == -1 and parent.isValid():
+            row = parent.row() + 1
+            parent = parent.parent()
+
+        # If still -1, append to end
+        if row == -1:
+            row = self.rowCount(parent)
+
+        return super().dropMimeData(data, action, row, column, parent)
+
+
+class _ItemSnapshot(NamedTuple):
+    item: LabelListWidgetItem
+    check_state: Qt.CheckState
 
 
 class LabelListWidget(QtWidgets.QListView):
-    itemDoubleClicked = QtCore.pyqtSignal(LabelListWidgetItem)
-    itemSelectionChanged = QtCore.pyqtSignal(list, list)
+    item_double_clicked = QtCore.pyqtSignal(LabelListWidgetItem)
+    item_selection_changed = QtCore.pyqtSignal(list, list)
 
-    def __init__(self):
-        super(LabelListWidget, self).__init__()
-        self._selectedItems = []
+    def __init__(self) -> None:
+        super().__init__()
 
-        self.setWindowFlags(Qt.Window)  # type: ignore[attr-defined]
+        self.setWindowFlags(Qt.Window)
 
-        self._model: StandardItemModel = StandardItemModel()
-        self._model.setItemPrototype(LabelListWidgetItem())  # type: ignore[union-attr]
+        self._model: _ItemModel = _ItemModel()
+        self._model.setItemPrototype(LabelListWidgetItem())
         self.setModel(self._model)
 
         self.setItemDelegate(HTMLDelegate())
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
         self.setDragDropMode(QtWidgets.QAbstractItemView.InternalMove)
-        self.setDefaultDropAction(Qt.MoveAction)  # type: ignore[attr-defined]
+        self.setDefaultDropAction(Qt.MoveAction)
 
-        self.doubleClicked.connect(self.itemDoubleClickedEvent)
-        self.selectionModel().selectionChanged.connect(self.itemSelectionChangedEvent)  # type: ignore[union-attr]
+        self.doubleClicked.connect(self._on_item_double_clicked)
+        self.selectionModel().selectionChanged.connect(self._on_item_selection_changed)
 
-    def __len__(self):
-        return self._model.rowCount()  # type: ignore[union-attr]
+        self._press_snapshot: tuple[_ItemSnapshot, ...] = ()
 
-    def __getitem__(self, i):
-        return self._model.item(i)  # type: ignore[union-attr]
+    def mousePressEvent(self, e: QtGui.QMouseEvent) -> None:
+        self._press_snapshot = tuple(
+            _ItemSnapshot(item=item, check_state=item.checkState())
+            for item in self.selected_items()
+        )
+        super().mousePressEvent(e)
 
-    def __iter__(self):
+    def mouseReleaseEvent(self, e: QtGui.QMouseEvent) -> None:
+        super().mouseReleaseEvent(e)
+
+        # Restore the multi-selection only when a checkbox toggle collapsed it.
+        # A plain row click should narrow the selection to one row.
+        check_state_changed = any(
+            snap.item.checkState() != snap.check_state for snap in self._press_snapshot
+        )
+        items_at_press = tuple(snap.item for snap in self._press_snapshot)
+        if (
+            check_state_changed
+            and len(items_at_press) > 1
+            and set(self.selected_items()) != set(items_at_press)
+        ):
+            self.selectionModel().clearSelection()
+            for item in items_at_press:
+                self.selectionModel().select(
+                    self._model.indexFromItem(item),
+                    QtCore.QItemSelectionModel.Select,
+                )
+
+        self._press_snapshot = ()
+
+    def selection_at_press(self) -> tuple[LabelListWidgetItem, ...]:
+        return tuple(snap.item for snap in self._press_snapshot)
+
+    def __len__(self) -> int:
+        return self._model.rowCount()
+
+    def __getitem__(self, i: int) -> LabelListWidgetItem:
+        return cast(LabelListWidgetItem, self._model.item(i))
+
+    def __iter__(self) -> Iterator[LabelListWidgetItem]:
         for i in range(len(self)):
             yield self[i]
 
     @property
-    def itemDropped(self):
-        return self._model.itemDropped  # type: ignore[union-attr]
+    def item_dropped(self) -> QtCore.pyqtBoundSignal:
+        return self._model.item_dropped
 
     @property
-    def itemChanged(self):
-        return self._model.itemChanged  # type: ignore[union-attr]
+    def item_changed(self) -> QtCore.pyqtBoundSignal:
+        return self._model.itemChanged
 
-    def itemSelectionChangedEvent(self, selected, deselected):
-        selected = [self._model.itemFromIndex(i) for i in selected.indexes()]  # type: ignore[union-attr]
-        deselected = [self._model.itemFromIndex(i) for i in deselected.indexes()]  # type: ignore[union-attr]
-        self.itemSelectionChanged.emit(selected, deselected)
+    def _on_item_selection_changed(
+        self,
+        selected: QtCore.QItemSelection,
+        deselected: QtCore.QItemSelection,
+    ) -> None:
+        selected_items = [self._model.itemFromIndex(i) for i in selected.indexes()]
+        deselected_items = [self._model.itemFromIndex(i) for i in deselected.indexes()]
+        self.item_selection_changed.emit(selected_items, deselected_items)
 
-    def itemDoubleClickedEvent(self, index):
-        self.itemDoubleClicked.emit(self._model.itemFromIndex(index))  # type: ignore[union-attr]
+    def _on_item_double_clicked(self, index: QtCore.QModelIndex) -> None:
+        self.item_double_clicked.emit(self._model.itemFromIndex(index))
 
-    def selectedItems(self):
-        return [self._model.itemFromIndex(i) for i in self.selectedIndexes()]  # type: ignore[union-attr]
+    def selected_items(self) -> list[LabelListWidgetItem]:
+        return [
+            cast(LabelListWidgetItem, self._model.itemFromIndex(i))
+            for i in self.selectedIndexes()
+        ]
 
-    def scrollToItem(self, item):
-        self.scrollTo(self._model.indexFromItem(item))  # type: ignore[union-attr]
+    def scroll_to_item(self, item: LabelListWidgetItem) -> None:
+        self.scrollTo(self._model.indexFromItem(item))
 
-    def addItem(self, item):
+    def add_item(self, item: LabelListWidgetItem) -> None:
         if not isinstance(item, LabelListWidgetItem):
             raise TypeError("item must be LabelListWidgetItem")
-        self._model.setItem(self._model.rowCount(), 0, item)  # type: ignore[union-attr]
-        item.setSizeHint(self.itemDelegate().sizeHint(None, None))  # type: ignore[arg-type,union-attr]
+        self._model.setItem(self._model.rowCount(), 0, item)
+        item.setSizeHint(self.itemDelegate().sizeHint(None, None))  # ty: ignore[invalid-argument-type]
 
-    def removeItem(self, item):
-        index = self._model.indexFromItem(item)  # type: ignore[union-attr]
-        self._model.removeRows(index.row(), 1)  # type: ignore[union-attr]
+    def remove_item(self, item: LabelListWidgetItem) -> None:
+        index = self._model.indexFromItem(item)
+        self._model.removeRows(index.row(), 1)
 
-    def selectItem(self, item):
-        index = self._model.indexFromItem(item)  # type: ignore[union-attr]
-        self.selectionModel().select(index, QtCore.QItemSelectionModel.Select)  # type: ignore[attr-defined,union-attr]
+    def select_item(self, item: LabelListWidgetItem) -> None:
+        index = self._model.indexFromItem(item)
+        self.selectionModel().select(index, QtCore.QItemSelectionModel.Select)
 
-    def findItemByShape(self, shape):
-        for row in range(self._model.rowCount()):  # type: ignore[union-attr]
-            item = self._model.item(row, 0)  # type: ignore[union-attr]
+    def find_item_by_shape(self, shape: Shape) -> LabelListWidgetItem:
+        for row in range(self._model.rowCount()):
+            item = self._model.item(row, 0)
             item = cast(LabelListWidgetItem, item)
             if item.shape() == shape:
                 return item
-        raise ValueError("cannot find shape: {}".format(shape))
+        raise ValueError(f"cannot find shape: {shape}")
 
-    def clear(self):
-        self._model.clear()  # type: ignore[union-attr]
+    def clear(self) -> None:
+        self._model.clear()

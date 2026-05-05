@@ -1,12 +1,9 @@
 #!/usr/bin/env python
 
-from __future__ import print_function
 
 import argparse
-import glob
-import os
-import os.path as osp
 import sys
+from pathlib import Path
 
 import imgviz
 import numpy as np
@@ -14,7 +11,7 @@ import numpy as np
 import labelme
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
@@ -34,31 +31,32 @@ def main():
     )
     args = parser.parse_args()
 
-    if osp.exists(args.output_dir):
-        print("Output directory already exists:", args.output_dir)
+    output_dir = Path(args.output_dir)
+    if output_dir.exists():
+        print("Output directory already exists:", output_dir)
         sys.exit(1)
-    os.makedirs(args.output_dir)
-    os.makedirs(osp.join(args.output_dir, "JPEGImages"))
-    os.makedirs(osp.join(args.output_dir, "SegmentationClass"))
+    output_dir.mkdir(parents=True)
+    (output_dir / "JPEGImages").mkdir(parents=True)
+    (output_dir / "SegmentationClass").mkdir(parents=True)
     if not args.nonpy:
-        os.makedirs(osp.join(args.output_dir, "SegmentationClassNpy"))
+        (output_dir / "SegmentationClassNpy").mkdir(parents=True)
     if not args.noviz:
-        os.makedirs(osp.join(args.output_dir, "SegmentationClassVisualization"))
+        (output_dir / "SegmentationClassVisualization").mkdir(parents=True)
     if not args.noobject:
-        os.makedirs(osp.join(args.output_dir, "SegmentationObject"))
+        (output_dir / "SegmentationObject").mkdir(parents=True)
         if not args.nonpy:
-            os.makedirs(osp.join(args.output_dir, "SegmentationObjectNpy"))
+            (output_dir / "SegmentationObjectNpy").mkdir(parents=True)
         if not args.noviz:
-            os.makedirs(osp.join(args.output_dir, "SegmentationObjectVisualization"))
-    print("Creating dataset:", args.output_dir)
+            (output_dir / "SegmentationObjectVisualization").mkdir(parents=True)
+    print("Creating dataset:", output_dir)
 
-    if osp.exists(args.labels):
+    if Path(args.labels).exists():
         with open(args.labels) as f:
             labels = [label.strip() for label in f if label]
     else:
         labels = [label.strip() for label in args.labels.split(",")]
 
-    class_names = []
+    class_names: list[str] = []
     class_name_to_id = {}
     for i, label in enumerate(labels):
         class_id = i - 1  # starts with -1
@@ -70,47 +68,37 @@ def main():
         elif class_id == 0:
             assert class_name == "_background_"
         class_names.append(class_name)
-    class_names = tuple(class_names)
     print("class_names:", class_names)
-    out_class_names_file = osp.join(args.output_dir, "class_names.txt")
+    out_class_names_file = output_dir / "class_names.txt"
     with open(out_class_names_file, "w") as f:
         f.writelines("\n".join(class_names))
     print("Saved class_names:", out_class_names_file)
 
-    for filename in sorted(glob.glob(osp.join(args.input_dir, "*.json"))):
-        print("Generating dataset from:", filename)
+    for path in sorted(Path(args.input_dir).glob("*.json")):
+        print("Generating dataset from:", path)
 
-        label_file = labelme.LabelFile(filename=filename)
+        label_file = labelme.LabelFile(filename=str(path))
 
-        base = osp.splitext(osp.basename(filename))[0]
-        out_img_file = osp.join(args.output_dir, "JPEGImages", base + ".jpg")
-        out_clsp_file = osp.join(args.output_dir, "SegmentationClass", base + ".png")
+        base = path.stem
+        out_img_file = output_dir / "JPEGImages" / f"{base}.jpg"
+        out_clsp_file = output_dir / "SegmentationClass" / f"{base}.png"
         if not args.nonpy:
-            out_cls_file = osp.join(
-                args.output_dir, "SegmentationClassNpy", base + ".npy"
-            )
+            out_cls_file = output_dir / "SegmentationClassNpy" / f"{base}.npy"
         if not args.noviz:
-            out_clsv_file = osp.join(
-                args.output_dir,
-                "SegmentationClassVisualization",
-                base + ".jpg",
+            out_clsv_file = (
+                output_dir / "SegmentationClassVisualization" / f"{base}.jpg"
             )
         if not args.noobject:
-            out_insp_file = osp.join(
-                args.output_dir, "SegmentationObject", base + ".png"
-            )
+            out_insp_file = output_dir / "SegmentationObject" / f"{base}.png"
             if not args.nonpy:
-                out_ins_file = osp.join(
-                    args.output_dir, "SegmentationObjectNpy", base + ".npy"
-                )
+                out_ins_file = output_dir / "SegmentationObjectNpy" / f"{base}.npy"
             if not args.noviz:
-                out_insv_file = osp.join(
-                    args.output_dir,
-                    "SegmentationObjectVisualization",
-                    base + ".jpg",
+                out_insv_file = (
+                    output_dir / "SegmentationObjectVisualization" / f"{base}.jpg"
                 )
 
-        img = labelme.utils.img_data_to_arr(label_file.imageData)
+        assert label_file.image_data is not None
+        img = labelme.utils.img_data_to_arr(label_file.image_data)
         imgviz.io.imsave(out_img_file, img)
 
         cls, ins = labelme.utils.shapes_to_label(
@@ -121,7 +109,7 @@ def main():
         ins[cls == -1] = 0  # ignore it.
 
         # class label
-        labelme.utils.lblsave(out_clsp_file, cls)
+        imgviz.io.lblsave(out_clsp_file, cls.astype(np.uint8))
         if not args.nonpy:
             np.save(out_cls_file, cls)
         if not args.noviz:
@@ -136,7 +124,7 @@ def main():
 
         if not args.noobject:
             # instance label
-            labelme.utils.lblsave(out_insp_file, ins)
+            imgviz.io.lblsave(out_insp_file, ins.astype(np.uint8))
             if not args.nonpy:
                 np.save(out_ins_file, ins)
             if not args.noviz:

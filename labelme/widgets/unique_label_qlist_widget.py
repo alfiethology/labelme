@@ -1,62 +1,67 @@
-# -*- encoding: utf-8 -*-
+from __future__ import annotations
 
-import html
-
+from PyQt5 import QtGui
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt
 
-from .escapable_qlist_widget import EscapableQListWidget
+from .label_list_widget import HTMLDelegate
+from .label_list_widget import format_label_with_color_dot
 
 
-class UniqueLabelQListWidget(EscapableQListWidget):
-    def mousePressEvent(self, event):
-        super(UniqueLabelQListWidget, self).mousePressEvent(event)
-        if not self.indexAt(event.pos()).isValid():
+class _EscapableQListWidget(QtWidgets.QListWidget):
+    def keyPressEvent(self, keyEvent: QtGui.QKeyEvent) -> None:  # ty: ignore[invalid-method-override]
+        super().keyPressEvent(keyEvent)
+        if keyEvent.key() == Qt.Key_Escape:
             self.clearSelection()
 
-    def findItemByLabel(self, label):
+
+class UniqueLabelQListWidget(_EscapableQListWidget):
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent=parent)
+        self.setItemDelegate(HTMLDelegate(parent=self))
+
+    def mousePressEvent(self, mouseEvent: QtGui.QMouseEvent) -> None:  # ty: ignore[invalid-method-override]
+        super().mousePressEvent(mouseEvent)
+        if not self.indexAt(mouseEvent.pos()).isValid():
+            self.clearSelection()
+
+    def find_label_item(self, label: str) -> QtWidgets.QListWidgetItem | None:
         for row in range(self.count()):
             item = self.item(row)
-            if item.data(Qt.UserRole) == label:  # type: ignore[attr-defined,union-attr]
+            if item and item.data(Qt.UserRole) == label:
                 return item
+        return None
 
-    def createItemFromLabel(self, label):
-        if self.findItemByLabel(label):
-            raise ValueError("Item for label '{}' already exists".format(label))
+    # Backward-compatible API for callers still using camelCase names.
+    def findItemByLabel(self, label: str) -> QtWidgets.QListWidgetItem | None:
+        return self.find_label_item(label)
+
+    def add_label_item(self, label: str, color: tuple[int, int, int]) -> None:
+        if self.find_label_item(label):
+            raise ValueError(f"Item for label '{label}' already exists")
 
         item = QtWidgets.QListWidgetItem()
-        item.setData(Qt.UserRole, label)  # type: ignore[attr-defined]
-        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)  # type: ignore[attr-defined]
-        item.setCheckState(Qt.Checked)  # type: ignore[attr-defined]
+        item.setData(Qt.UserRole, label)  # for find_label_item
+        item.setText(format_label_with_color_dot(text=label, color=color))
+        self.addItem(item)
+
+    def createItemFromLabel(self, label: str) -> QtWidgets.QListWidgetItem:
+        if self.find_label_item(label):
+            raise ValueError(f"Item for label '{label}' already exists")
+        item = QtWidgets.QListWidgetItem()
+        item.setData(Qt.UserRole, label)
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(Qt.Checked)
         return item
 
-    def setItemLabel(self, item, label, color=None):
-        widget = QtWidgets.QWidget()
-        layout = QtWidgets.QHBoxLayout(widget)
-        layout.setContentsMargins(2, 0, 2, 0)
-        layout.setSpacing(4)
-
-        checkbox = QtWidgets.QCheckBox()
-        checkbox.setChecked(item.checkState() == Qt.Checked)  # type: ignore[attr-defined]
-        checkbox.stateChanged.connect(
-            lambda state: item.setCheckState(
-                Qt.Checked if state == Qt.Checked else Qt.Unchecked  # type: ignore[attr-defined]
-            )
-        )
-        layout.addWidget(checkbox)
-
-        qlabel = QtWidgets.QLabel()
+    def setItemLabel(
+        self,
+        item: QtWidgets.QListWidgetItem,
+        label: str,
+        color: tuple[int, int, int] | None = None,
+    ) -> None:
+        item.setData(Qt.UserRole, label)
         if color is None:
-            qlabel.setText("{}".format(label))
-        else:
-            qlabel.setText(
-                '{} <font color="#{:02x}{:02x}{:02x}">●</font>'.format(
-                    html.escape(label), *color
-                )
-            )
-        qlabel.setAlignment(Qt.AlignBottom)  # type: ignore[attr-defined]
-        layout.addWidget(qlabel, 1)
-
-        item.setSizeHint(widget.sizeHint())
-
-        self.setItemWidget(item, widget)
+            item.setText(label)
+            return
+        item.setText(format_label_with_color_dot(text=label, color=color))

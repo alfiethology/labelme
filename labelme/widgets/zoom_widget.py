@@ -1,21 +1,27 @@
+from __future__ import annotations
+
+from typing import Final
+
 from PyQt5 import QtCore
-from PyQt5 import QtGui
 from PyQt5 import QtWidgets
 
 
 class ZoomWidget(QtWidgets.QSpinBox):
-    def __init__(self, value=100):
-        super(ZoomWidget, self).__init__()
-        self.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
-        self.setRange(1, 1000)
-        self.setSuffix(" %")
-        self.setValue(value)
-        self.setToolTip("Zoom Level")
-        self.setStatusTip(self.toolTip())
-        self.setAlignment(QtCore.Qt.AlignCenter)  # type: ignore[attr-defined]
+    PERCENT_MAX: Final = 1000
+    PERCENT_SUFFIX: Final = " %"
 
-    def minimumSizeHint(self):
-        height = super(ZoomWidget, self).minimumSizeHint().height()
-        fm = QtGui.QFontMetrics(self.font())
-        width = fm.width(str(self.maximum()))
-        return QtCore.QSize(width, height)
+    def __init__(self) -> None:
+        super().__init__()
+        self.setRange(1, self.PERCENT_MAX)
+        self.setValue(100)
+        self.setSuffix(self.PERCENT_SUFFIX)
+        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+        tooltip = "Zoom Level"
+        self.setToolTip(tooltip)
+        self.setStatusTip(tooltip)
+        self._apply_minimum_width()
+
+    def _apply_minimum_width(self) -> None:
+        sample = f"{self.PERCENT_MAX}{self.PERCENT_SUFFIX}"
+        self.setMinimumWidth(self.fontMetrics().horizontalAdvance(sample))

@@ -1,10 +1,9 @@
 # Classification Example
 
-
 ## Usage
 
 ```bash
-labelme data_annotated --flags flags.txt --nodata
+labelme data_annotated --flags flags.txt
 ```
 
 <img src=".readme/annotation_cat.jpg" width="100%" />

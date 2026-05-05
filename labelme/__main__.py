@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 import argparse
-import codecs
 import contextlib
 import io
 import os
-import os.path as osp
 import sys
 import traceback
+import types
+import warnings
+from pathlib import Path
+from typing import AnyStr
 
 import yaml
 from loguru import logger
@@ -15,15 +19,16 @@ from PyQt5 import QtWidgets
 from labelme import __appname__
 from labelme import __version__
 from labelme.app import MainWindow
-from labelme.config import get_config
-from labelme.utils import newIcon
+from labelme.config import get_user_config_file
+from labelme.utils import new_icon
 
 
 class _LoggerIO(io.StringIO):
-    def write(self, message: str) -> int:
-        if stripped_message := message.strip():
-            logger.debug(stripped_message)
-        return len(message)
+    def write(self, s: AnyStr) -> int:
+        assert isinstance(s, str)
+        if stripped_s := s.strip():
+            logger.debug(stripped_s)
+        return len(s)
 
     def flush(self) -> None:
         pass
@@ -51,15 +56,14 @@ def _setup_loguru(logger_level: str) -> None:
     if sys.stderr:
         logger.add(sys.stderr, level=logger_level)
 
-    cache_dir: str
     if os.name == "nt":
-        cache_dir = os.path.join(os.environ["LOCALAPPDATA"], "labelme")
+        cache_dir = Path(os.environ["LOCALAPPDATA"]) / "labelme"
     else:
-        cache_dir = os.path.expanduser("~/.cache/labelme")
+        cache_dir = Path("~/.cache/labelme").expanduser()
 
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
-    log_file = os.path.join(cache_dir, "labelme.log")
+    log_file = cache_dir / "labelme.log"
     logger.add(
         log_file,
         colorize=True,
@@ -73,7 +77,11 @@ def _setup_loguru(logger_level: str) -> None:
     )
 
 
-def _handle_exception(exc_type, exc_value, exc_traceback):
+def _handle_exception(
+    exc_type: type[BaseException],
+    exc_value: BaseException,
+    exc_traceback: types.TracebackType | None,
+) -> None:
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         sys.exit(0)
@@ -95,7 +103,7 @@ def _handle_exception(exc_type, exc_value, exc_traceback):
     sys.exit(1)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", "-V", action="store_true", help="show version")
     parser.add_argument("--reset-config", action="store_true", help="reset qt config")
@@ -105,40 +113,50 @@ def main():
         choices=["debug", "info", "warning", "fatal", "error"],
         help="logger level",
     )
-    parser.add_argument("filename", nargs="?", help="image or label filename")
+    parser.add_argument("path", nargs="?", help="image file, label file, or directory")
     parser.add_argument(
         "--output",
-        "-O",
-        "-o",
-        help="output file or directory (if it ends with .json it is "
-        "recognized as file, else as directory)",
+        help="output directory for saving annotation JSON files",
     )
-    default_config_file = os.path.join(os.path.expanduser("~"), ".labelmerc")
+    default_config_file = get_user_config_file()
     parser.add_argument(
         "--config",
         dest="config",
-        help="config file or yaml-format string (default: {})".format(
-            default_config_file
-        ),
+        help=f"config file or yaml-format string (default: {default_config_file})",
         default=default_config_file,
     )
     # config for the gui
     parser.add_argument(
         "--nodata",
-        dest="store_data",
+        dest="_deprecated_nodata",
+        action="store_true",
+        help=argparse.SUPPRESS,
+        default=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--with-image-data",
+        dest="with_image_data",
+        action="store_true",
+        help="store image data in JSON file",
+        default=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--no-auto-save",
+        dest="auto_save",
         action="store_false",
-        help="stop storing image data to JSON file",
+        help="disable auto save",
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--autosave",
-        dest="auto_save",
+        dest="_deprecated_autosave",
         action="store_true",
-        help="auto save",
+        help=argparse.SUPPRESS,
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--nosortlabels",
+        "--no-sort-labels",
+        "--nosortlabels",  # deprecated
         dest="sort_labels",
         action="store_false",
         help="stop sorting labels",
@@ -150,7 +168,8 @@ def main():
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--labelflags",
+        "--label-flags",
+        "--labelflags",  # deprecated
         dest="label_flags",
         help=r"yaml string of label specific flags OR file containing json "
         r"string of label specific flags (ex. {person-\d+: [male, tall], "
@@ -163,7 +182,8 @@ def main():
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--validatelabel",
+        "--validate-label",
+        "--validatelabel",  # deprecated
         dest="validate_label",
         choices=["exact"],
         help="label validation types",
@@ -183,31 +203,51 @@ def main():
     )
     args = parser.parse_args()
 
+    if hasattr(args, "_deprecated_nodata"):
+        warnings.warn(
+            "--nodata is deprecated and will be removed in a future version. "
+            "Image data is no longer stored by default. "
+            "Use --with-image-data to store it.",
+            FutureWarning,
+            stacklevel=1,
+        )
+        del args._deprecated_nodata
+
+    if hasattr(args, "_deprecated_autosave"):
+        warnings.warn(
+            "--autosave is deprecated and will be removed in a future version. "
+            "Auto save is now enabled by default. Use --no-autosave to disable it.",
+            FutureWarning,
+            stacklevel=1,
+        )
+        del args._deprecated_autosave
+
     if args.version:
-        print("{0} {1}".format(__appname__, __version__))
+        print(f"{__appname__} {__version__}")
         sys.exit(0)
 
     _setup_loguru(logger_level=args.logger_level.upper())
+    logger.info("Starting {} {}", __appname__, __version__)
 
     sys.excepthook = _handle_exception
 
     if hasattr(args, "flags"):
-        if os.path.isfile(args.flags):
-            with codecs.open(args.flags, "r", encoding="utf-8") as f:
+        if Path(args.flags).is_file():
+            with open(args.flags, encoding="utf-8") as f:
                 args.flags = [line.strip() for line in f if line.strip()]
         else:
             args.flags = [line for line in args.flags.split(",") if line]
 
     if hasattr(args, "labels"):
-        if os.path.isfile(args.labels):
-            with codecs.open(args.labels, "r", encoding="utf-8") as f:
+        if Path(args.labels).is_file():
+            with open(args.labels, encoding="utf-8") as f:
                 args.labels = [line.strip() for line in f if line.strip()]
         else:
             args.labels = [line for line in args.labels.split(",") if line]
 
     if hasattr(args, "label_flags"):
-        if os.path.isfile(args.label_flags):
-            with codecs.open(args.label_flags, "r", encoding="utf-8") as f:
+        if Path(args.label_flags).is_file():
+            with open(args.label_flags, encoding="utf-8") as f:
                 args.label_flags = yaml.safe_load(f)
         else:
             args.label_flags = yaml.safe_load(args.label_flags)
@@ -215,45 +255,56 @@ def main():
     config_from_args = args.__dict__
     config_from_args.pop("version")
     reset_config = config_from_args.pop("reset_config")
-    filename = config_from_args.pop("filename")
+    file_or_dir = config_from_args.pop("path")
     output = config_from_args.pop("output")
-    config_file_or_yaml = config_from_args.pop("config")
-    config = get_config(config_file_or_yaml, config_from_args)
 
-    if not config["labels"] and config["validate_label"]:
-        logger.error(
-            "--labels must be specified with --validatelabel or "
-            "validate_label: true in the config file "
-            "(ex. ~/.labelmerc)."
-        )
-        sys.exit(1)
+    config_overrides: dict
+    config_file: Path | None
+    config_str: str = config_from_args.pop("config")
+    if isinstance(config_loaded := yaml.safe_load(config_str), dict):
+        config_overrides = config_loaded
+        config_file = None
+    else:
+        config_overrides = {}
+        config_file = Path(config_str)
+        if not config_file.is_file():
+            logger.error(
+                "Config file does not exist: {!r}", str(config_file.absolute())
+            )
+            sys.exit(1)
+    del config_str
+    config_overrides.update(config_from_args)
 
-    output_file = None
     output_dir = None
     if output is not None:
         if output.endswith(".json"):
-            output_file = output
-        else:
-            output_dir = output
+            parser.error(
+                f"--output expects a directory path, but '{output}' looks like a file."
+                " Remove the .json extension or provide a directory path."
+            )
+        output_dir = output
 
     translator = QtCore.QTranslator()
     translator.load(
         QtCore.QLocale.system().name(),
-        osp.dirname(osp.abspath(__file__)) + "/translate",
+        str(Path(__file__).resolve().parent / "translate"),
     )
     app = QtWidgets.QApplication(sys.argv)
+    app.setStyle("Fusion")  # for consistent appearance across platforms
+    # Force light mode to avoid dark mode UI issues (e.g., invisible icons)
+    app.setPalette(QtWidgets.QStyleFactory.create("Fusion").standardPalette())
     app.setApplicationName(__appname__)
-    app.setWindowIcon(newIcon("icon"))
+    app.setWindowIcon(new_icon("icon"))
     app.installTranslator(translator)
     win = MainWindow(
-        config=config,
-        filename=filename,
-        output_file=output_file,
+        config_file=config_file,
+        config_overrides=config_overrides,
+        file_or_dir=file_or_dir,
         output_dir=output_dir,
     )
 
     if reset_config:
-        logger.info("Resetting Qt config: %s" % win.settings.fileName())
+        logger.info(f"Resetting Qt config: {win.settings.fileName()}")
         win.settings.clear()
         sys.exit(0)
 
