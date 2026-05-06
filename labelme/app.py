@@ -202,6 +202,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _scroll_values: dict[Qt.Orientation, dict[str, float]]
     _default_state: QtCore.QByteArray
     _point_mode_label_state: tuple[str, dict[str, bool], int | None, str] | None
+    _runtime_label_colors: dict[str, tuple[int, int, int]]
 
     def __init__(
         self,
@@ -250,6 +251,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._prev_opened_dir = None
         self._point_mode_label_state = None
+        self._runtime_label_colors = {}
         self._docks = self._setup_dock_widgets()
 
         self.setAcceptDrops(True)
@@ -1092,6 +1094,11 @@ class MainWindow(QtWidgets.QMainWindow):
         unique_label_list.setToolTip(
             self.tr("Select label to start annotating for it. Press 'Esc' to deselect.")
         )
+        unique_label_list.itemChanged.connect(self._on_unique_label_item_changed)
+        unique_label_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        unique_label_list.customContextMenuRequested.connect(
+            self.show_unique_label_list_menu
+        )
         if self._config["labels"]:
             for lbl in self._config["labels"]:
                 unique_label_list.add_label_item(
@@ -1412,6 +1419,31 @@ class MainWindow(QtWidgets.QMainWindow):
         # PyQt5 stubs type QMenu.exec() argument too narrowly
         self._menus.label_list.exec(self._docks.label_list.mapToGlobal(point))  # ty: ignore[invalid-argument-type]
 
+    def show_unique_label_list_menu(self, point: QtCore.QPoint) -> None:
+        item = self._docks.unique_label_list.itemAt(point)
+        if item is None:
+            return
+        label = item.data(Qt.UserRole)
+        if not isinstance(label, str):
+            return
+        menu = QtWidgets.QMenu(self)
+        change_color = menu.addAction(self.tr("Change Class Color…"))
+        picked = menu.exec(self._docks.unique_label_list.mapToGlobal(point))
+        if picked != change_color:
+            return
+        current_rgb = self._get_rgb_by_label(
+            label=label, unique_label_list=self._docks.unique_label_list
+        )
+        color = QtWidgets.QColorDialog.getColor(
+            QtGui.QColor(*current_rgb),
+            self,
+            self.tr("Choose Color for '{}'").format(label),
+        )
+        if not color.isValid():
+            return
+        self._runtime_label_colors[label] = (color.red(), color.green(), color.blue())
+        self._refresh_class_color(label=label)
+
     def validate_label(self, label: str) -> bool:
         policy = self._config["validate_label"]
         if policy is None:
@@ -1569,6 +1601,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._update_shape_color(shape)
         label_list_item.setText(format_shape_label(shape))
+        class_item = self._docks.unique_label_list.find_label_item(shape.label)
+        if class_item is not None and class_item.checkState() == Qt.Unchecked:
+            label_list_item.setCheckState(Qt.Unchecked)
+            self._canvas_widgets.canvas.set_shape_visible(shape=shape, value=False)
 
     def _update_shape_color(self, shape: Shape) -> None:
         assert shape.label is not None
@@ -1587,6 +1623,8 @@ class MainWindow(QtWidgets.QMainWindow):
         label: str,
         unique_label_list: UniqueLabelQListWidget,
     ) -> tuple[int, int, int]:
+        if label in self._runtime_label_colors:
+            return self._runtime_label_colors[label]
         if self._config["shape_color"] == "auto":
             item = unique_label_list.find_label_item(label)
             item_index: int = (
@@ -1609,6 +1647,19 @@ class MainWindow(QtWidgets.QMainWindow):
         if self._config["default_shape_color"]:
             return self._config["default_shape_color"]
         return (0, 255, 0)
+
+    def _refresh_class_color(self, *, label: str) -> None:
+        rgb = self._get_rgb_by_label(label=label, unique_label_list=self._docks.unique_label_list)
+        class_item = self._docks.unique_label_list.find_label_item(label)
+        if class_item is not None:
+            self._docks.unique_label_list.setItemLabel(class_item, label, color=rgb)
+        for label_item in self._docks.label_list:
+            shape = label_item.shape()
+            if shape is None or shape.label != label:
+                continue
+            self._update_shape_color(shape)
+            label_item.setText(format_shape_label(shape))
+        self._canvas_widgets.canvas.update()
 
     def remove_labels(self, shapes: list[Shape]) -> None:
         self._docks.label_list.item_dropped.disconnect(self._on_label_order_changed)
@@ -1735,6 +1786,29 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._canvas_widgets.canvas.backup_shapes()
         self._actions.undo.setEnabled(self._canvas_widgets.canvas.can_restore_shape)
+
+    def _on_unique_label_item_changed(self, item: QtWidgets.QListWidgetItem) -> None:
+        label = item.data(Qt.UserRole)
+        if not isinstance(label, str):
+            return
+        is_visible_new = item.checkState() == Qt.Checked
+        changed = False
+        new_check_state = Qt.Checked if is_visible_new else Qt.Unchecked
+        with QtCore.QSignalBlocker(self._docks.label_list._model):
+            for label_item in self._docks.label_list:
+                shape = label_item.shape()
+                if shape is None or shape.label != label:
+                    continue
+                if shape.visible == is_visible_new:
+                    continue
+                label_item.setCheckState(new_check_state)
+                self._canvas_widgets.canvas.set_shape_visible(
+                    shape=shape, value=is_visible_new
+                )
+                changed = True
+        if changed:
+            self._canvas_widgets.canvas.backup_shapes()
+            self._actions.undo.setEnabled(self._canvas_widgets.canvas.can_restore_shape)
 
     def _on_label_order_changed(self) -> None:
         self.mark_dirty()

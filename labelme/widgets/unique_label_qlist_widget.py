@@ -42,6 +42,8 @@ class UniqueLabelQListWidget(_EscapableQListWidget):
 
         item = QtWidgets.QListWidgetItem()
         item.setData(Qt.UserRole, label)  # for find_label_item
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(Qt.Checked)
         item.setText(format_label_with_color_dot(text=label, color=color))
         self.addItem(item)
 
