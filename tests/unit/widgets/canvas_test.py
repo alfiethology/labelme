@@ -5,6 +5,7 @@ from typing import Final
 import pytest
 from PyQt5 import QtGui
 from PyQt5.QtCore import QPointF
+from PyQt5.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
 from labelme.shape import Shape
@@ -139,3 +140,45 @@ def test_shape_visibility_survives_backup_and_restore(canvas: Canvas) -> None:
 
     canvas.restore_last_shape()
     assert canvas.is_shape_visible(canvas.shapes[0]) is False
+
+
+@pytest.mark.gui
+def test_polygon_hold_left_adds_point(canvas: Canvas) -> None:
+    canvas.set_editing(False)
+    canvas.create_mode = "polygon"
+
+    press_event = QtGui.QMouseEvent(
+        QtGui.QMouseEvent.MouseButtonPress,
+        QPointF(10, 10),
+        Qt.LeftButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+    canvas._dispatch_pointer_press(pos=QPointF(10, 10), event=press_event)
+
+    assert canvas.current is not None
+    assert len(canvas.current.points) == 1
+    assert canvas._polygon_hold_add_timer.isActive()
+
+    move_event = QtGui.QMouseEvent(
+        QtGui.QMouseEvent.MouseMove,
+        QPointF(30, 20),
+        Qt.NoButton,
+        Qt.LeftButton,
+        Qt.NoModifier,
+    )
+    canvas._dispatch_pointer_move(pos=QPointF(30, 20), event=move_event)
+    canvas._append_polygon_point_while_left_held()
+
+    assert canvas.current is not None
+    assert len(canvas.current.points) == 2
+
+    release_event = QtGui.QMouseEvent(
+        QtGui.QMouseEvent.MouseButtonRelease,
+        QPointF(30, 20),
+        Qt.LeftButton,
+        Qt.NoButton,
+        Qt.NoModifier,
+    )
+    canvas._dispatch_pointer_release(event=release_event)
+    assert not canvas._polygon_hold_add_timer.isActive()

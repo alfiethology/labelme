@@ -96,6 +96,22 @@ def _migrate_config_from_file(config_from_yaml: dict) -> None:
             )
             shortcuts[new_key] = shortcuts.pop(old_key)
 
+    # Migrate old AI crosshair mode keys.
+    _AI_CROSSHAIR_RENAMES = {
+        "ai_polygon": "ai_points_to_shape",
+        "ai_mask": "ai_box_to_shape",
+    }
+    crosshair = config_from_yaml.get("canvas", {}).get("crosshair", {})
+    if isinstance(crosshair, dict):
+        for old_key, new_key in _AI_CROSSHAIR_RENAMES.items():
+            if old_key in crosshair and new_key not in crosshair:
+                logger.info(
+                    "Migrating old config: canvas.crosshair.{} -> canvas.crosshair.{}",
+                    old_key,
+                    new_key,
+                )
+                crosshair[new_key] = crosshair.pop(old_key)
+
 
 def get_user_config_file(create_if_missing: bool = True) -> str:
     user_config_path = Path("~/.labelmerc").expanduser()

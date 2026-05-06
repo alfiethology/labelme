@@ -34,6 +34,8 @@ CURSOR_MOVE = Qt.ClosedHandCursor
 CURSOR_GRAB = Qt.OpenHandCursor
 
 MOVE_SPEED: float = 5.0
+POLYGON_HOLD_ADD_INTERVAL_MS: int = 200
+POLYGON_HOLD_MIN_STEP_PX: float = 2.0
 
 
 class CanvasMode(enum.Enum):
@@ -87,6 +89,8 @@ class Canvas(QtWidgets.QWidget):
     _osam_session_model_name: str = "sam2:latest"
     _osam_session: OsamSession | None
     _ai_output_format: Literal["polygon", "mask"] = "polygon"
+    _left_button_held: bool
+    _polygon_hold_add_timer: QtCore.QTimer
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         self.epsilon: float = kwargs.pop("epsilon", 10.0)
@@ -110,6 +114,12 @@ class Canvas(QtWidgets.QWidget):
             },
         )
         super().__init__(*args, **kwargs)
+        self._left_button_held = False
+        self._polygon_hold_add_timer = QtCore.QTimer(self)
+        self._polygon_hold_add_timer.setInterval(POLYGON_HOLD_ADD_INTERVAL_MS)
+        self._polygon_hold_add_timer.timeout.connect(
+            self._append_polygon_point_while_left_held
+        )
 
         self._cursor = CURSOR_DEFAULT
         self.reset_state()
@@ -248,6 +258,8 @@ class Canvas(QtWidgets.QWidget):
         self._update_status()
 
     def leaveEvent(self, a0: QtCore.QEvent) -> None:
+        self._left_button_held = False
+        self._stop_polygon_hold_add()
         if self._set_highlight(
             hovered_shape=None, hovered_edge=None, hovered_vertex=None
         ):
@@ -256,6 +268,8 @@ class Canvas(QtWidgets.QWidget):
         self._update_status()
 
     def focusOutEvent(self, a0: QtGui.QFocusEvent) -> None:
+        self._left_button_held = False
+        self._stop_polygon_hold_add()
         self._release_cursor()
         self._update_status()
 
@@ -621,6 +635,7 @@ class Canvas(QtWidgets.QWidget):
     def _dispatch_pointer_press(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
         button = event.button()
         if button == Qt.LeftButton:
+            self._left_button_held = True
             if self.zoom_mode:
                 self._begin_zoom_rect(event=event)
                 return
@@ -656,10 +671,53 @@ class Canvas(QtWidgets.QWidget):
     ) -> None:
         if self.current is not None:
             self._extend_current_shape(current=self.current, event=event)
+            self._maybe_start_polygon_hold_add()
             return
         if self.is_out_of_pixmap(pos):
             return
         self._start_new_shape(pos=pos, event=event, is_shift_pressed=is_shift_pressed)
+        self._maybe_start_polygon_hold_add()
+
+    def _maybe_start_polygon_hold_add(self) -> None:
+        if not self._left_button_held:
+            return
+        if not self.drawing():
+            return
+        if self.create_mode != "polygon":
+            return
+        if self.current is None:
+            return
+        if not self._polygon_hold_add_timer.isActive():
+            self._polygon_hold_add_timer.start()
+
+    def _stop_polygon_hold_add(self) -> None:
+        if self._polygon_hold_add_timer.isActive():
+            self._polygon_hold_add_timer.stop()
+
+    def _append_polygon_point_while_left_held(self) -> None:
+        if not self._left_button_held:
+            self._stop_polygon_hold_add()
+            return
+        if not self.drawing() or self.create_mode != "polygon":
+            self._stop_polygon_hold_add()
+            return
+        current = self.current
+        if current is None or len(self.line.points) < 2:
+            self._stop_polygon_hold_add()
+            return
+
+        next_point = self.line[1]
+        min_step = POLYGON_HOLD_MIN_STEP_PX / self.scale
+        if labelme.utils.distance(next_point - current[-1]) < min_step:
+            return
+
+        current.add_point(next_point)
+        self.line[0] = current[-1]
+        if current.is_closed():
+            self.finalise()
+            return
+        self.update()
+        self._update_status()
 
     def _extend_current_shape(self, current: Shape, event: QtGui.QMouseEvent) -> None:
         mode = self.create_mode
@@ -770,6 +828,8 @@ class Canvas(QtWidgets.QWidget):
             self._release_right(event=event)
             return
         if button == Qt.LeftButton:
+            self._left_button_held = False
+            self._stop_polygon_hold_add()
             if self.zoom_mode:
                 self._finish_zoom_rect()
                 return
@@ -1231,12 +1291,14 @@ class Canvas(QtWidgets.QWidget):
         return [self.current]
 
     def _reset_after_shape_creation(self) -> None:
+        self._stop_polygon_hold_add()
         self.current = None
         self.set_hide_background(False)
         self.new_shape.emit()
         self.update()
 
     def _cancel_current_shape(self) -> None:
+        self._stop_polygon_hold_add()
         self.current = None
         self.drawing_polygon.emit(False)
         self.update()
@@ -1431,6 +1493,8 @@ class Canvas(QtWidgets.QWidget):
         QtWidgets.QApplication.restoreOverrideCursor()
 
     def reset_state(self) -> None:
+        self._left_button_held = False
+        self._stop_polygon_hold_add()
         self._release_cursor()
         self.pixmap = QtGui.QPixmap()
         self._pixmap_hash = None
