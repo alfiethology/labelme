@@ -12,8 +12,10 @@ from pytestqt.qtbot import QtBot
 
 from ..conftest import assert_labelfile_sanity
 from ..conftest import close_or_pause
+from .conftest import click_canvas_fraction
 from .conftest import MainWinFactory
 from .conftest import show_window_and_wait_for_imagedata
+from .conftest import submit_label_dialog
 
 # Smallest available model (~40MB) to keep download and inference fast
 _AI_MODEL = "efficientsam:10m"
@@ -239,5 +241,44 @@ def test_ai_model_download(
 
     # Verify the model was downloaded to the temp dir
     assert any(Path(blob_base).rglob("*"))
+
+    close_or_pause(qtbot=qtbot, widget=win, pause=pause)
+
+
+@pytest.mark.gui
+def test_point_mode_reuses_label_without_reprompt(
+    main_win: MainWinFactory,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    data_path: Path,
+    tmp_path: Path,
+    pause: bool,
+) -> None:
+    win = main_win(
+        file_or_dir=str(data_path / "raw/2011_000003.jpg"),
+        output_dir=str(tmp_path),
+    )
+    show_window_and_wait_for_imagedata(qtbot=qtbot, win=win)
+
+    canvas = win._canvas_widgets.canvas
+    win._switch_canvas_mode(edit=False, create_mode="point")
+    qtbot.wait(50)
+
+    label = "point_class"
+    submit_label_dialog(qtbot=qtbot, label_dialog=win._label_dialog, label=label)
+    click_canvas_fraction(qtbot=qtbot, canvas=canvas, xy=(0.25, 0.25))
+    qtbot.waitUntil(lambda: len(canvas.shapes) == 1, timeout=3000)
+    assert canvas.shapes[0].label == label
+
+    def _unexpected_popup(
+        *args: object, **kwargs: object
+    ) -> tuple[None, None, None, None]:
+        raise AssertionError("Point mode should not re-open label popup")
+
+    monkeypatch.setattr(win._label_dialog, "popup", _unexpected_popup)
+
+    click_canvas_fraction(qtbot=qtbot, canvas=canvas, xy=(0.6, 0.6))
+    qtbot.waitUntil(lambda: len(canvas.shapes) == 2, timeout=3000)
+    assert [shape.label for shape in canvas.shapes] == [label, label]
 
     close_or_pause(qtbot=qtbot, widget=win, pause=pause)

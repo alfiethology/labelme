@@ -201,6 +201,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _brightness_contrast_values: dict[str, tuple[int | None, int | None]]
     _scroll_values: dict[Qt.Orientation, dict[str, float]]
     _default_state: QtCore.QByteArray
+    _point_mode_label_state: tuple[str, dict[str, bool], int | None, str] | None
 
     def __init__(
         self,
@@ -248,6 +249,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         self._prev_opened_dir = None
+        self._point_mode_label_state = None
         self._docks = self._setup_dock_widgets()
 
         self.setAcceptDrops(True)
@@ -1331,6 +1333,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._image_data = None
         self._label_file_path = None
         self._other_data = None
+        self._point_mode_label_state = None
         self._canvas_widgets.canvas.reset_state()
 
     # Callbacks
@@ -1744,17 +1747,42 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_new_shape(self) -> None:
         items = self._docks.unique_label_list.selectedItems()
-        text = None
+        text: str | None = None
         if items:
             text = items[0].data(Qt.UserRole)
-        flags = {}
-        group_id = None
+        flags: dict[str, bool] = {}
+        group_id: int | None = None
         description = ""
-        if self._config["display_label_popup"] or not text:
+        is_point_mode = self._canvas_widgets.canvas.create_mode == "point"
+        if is_point_mode:
+            cached_label_state = self._point_mode_label_state
+            if text:
+                if cached_label_state and cached_label_state[0] == text:
+                    _, cached_flags, cached_group_id, cached_description = (
+                        cached_label_state
+                    )
+                    flags = dict(cached_flags)
+                    group_id = cached_group_id
+                    description = cached_description
+            elif cached_label_state:
+                text, cached_flags, group_id, description = cached_label_state
+                flags = dict(cached_flags)
+
+        should_prompt_for_label = self._config["display_label_popup"] or not text
+        if is_point_mode and text:
+            should_prompt_for_label = False
+        if should_prompt_for_label:
             previous_text = self._label_dialog.edit.text()
             text, flags, group_id, description = self._label_dialog.popup(text)
             if not text:
                 self._label_dialog.edit.setText(previous_text)
+            elif is_point_mode:
+                self._point_mode_label_state = (
+                    text,
+                    dict(flags),
+                    group_id,
+                    description,
+                )
 
         if text and not self.validate_label(text):
             self.show_error_message(
@@ -1765,6 +1793,13 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             text = ""
         if text:
+            if is_point_mode:
+                self._point_mode_label_state = (
+                    text,
+                    dict(flags),
+                    group_id,
+                    description,
+                )
             self._docks.label_list.clearSelection()
             assert isinstance(flags, dict)
             shapes = self._canvas_widgets.canvas.set_last_label(text, flags)
