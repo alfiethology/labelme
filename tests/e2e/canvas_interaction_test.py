@@ -238,7 +238,7 @@ def test_add_point_on_edge(
     mid_widget = image_to_widget_pos(canvas=canvas, image_pos=edge_mid)
     qtbot.mouseMove(canvas, pos=mid_widget)
     qtbot.wait(100)
-    qtbot.mouseClick(canvas, Qt.LeftButton, modifier=Qt.AltModifier, pos=mid_widget)
+    qtbot.mouseClick(canvas, Qt.LeftButton, pos=mid_widget)
     qtbot.wait(50)
 
     assert len(shape.points) == num_points_before + 1

@@ -79,6 +79,7 @@ class Canvas(QtWidgets.QWidget):
     _create_mode = "polygon"
 
     _fill_drawing = False
+    _fill_editing = False
 
     prev_point: QPointF
     prev_move_point: QPointF
@@ -156,6 +157,14 @@ class Canvas(QtWidgets.QWidget):
 
     def set_fill_drawing(self, value: bool) -> None:
         self._fill_drawing = value
+        self.update()
+
+    def fill_editing(self) -> bool:
+        return self._fill_editing
+
+    def set_fill_editing(self, value: bool) -> None:
+        self._fill_editing = value
+        self.update()
 
     def set_zoom_rect_mode(self, enabled: bool) -> None:
         self.zoom_mode = enabled
@@ -578,7 +587,7 @@ class Canvas(QtWidgets.QWidget):
                     hovered_shape=shape, hovered_edge=index_edge, hovered_vertex=None
                 )
                 self._apply_cursor(CURSOR_POINT)
-                status_messages.append(self.tr("ALT + Click to create point on shape"))
+                status_messages.append(self.tr("Click to create point on shape"))
                 self.update()
                 return
 
@@ -785,7 +794,10 @@ class Canvas(QtWidgets.QWidget):
 
     def _press_left_while_editing(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
         modifiers = event.modifiers()
-        self._maybe_modify_polygon_topology(modifiers=modifiers)
+        if self._maybe_modify_polygon_topology(modifiers=modifiers):
+            self.prev_point = pos
+            self.update()
+            return
         self.select_shape_point(
             pos,
             multiple_selection_mode=int(modifiers) == Qt.ControlModifier,
@@ -793,14 +805,20 @@ class Canvas(QtWidgets.QWidget):
         self.prev_point = pos
         self.update()
 
-    def _maybe_modify_polygon_topology(self, modifiers: Qt.KeyboardModifiers) -> None:
-        if self.is_edge_selected() and modifiers == Qt.AltModifier:
+    def _maybe_modify_polygon_topology(self, modifiers: Qt.KeyboardModifiers) -> bool:
+        modifier_value = int(modifiers)
+        if self.is_edge_selected() and modifier_value in (
+            int(Qt.NoModifier),
+            int(Qt.AltModifier),
+        ):
             self.add_point_to_edge()
-            return
-        if self.is_vertex_selected() and modifiers == (
+            return True
+        if self.is_vertex_selected() and modifier_value == int(
             Qt.AltModifier | Qt.ShiftModifier
         ):
             self.remove_selected_point()
+            return True
+        return False
 
     def _press_right(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
         if _should_reselect_on_right_press(
@@ -1184,7 +1202,11 @@ class Canvas(QtWidgets.QWidget):
                 hide_background=self._hide_background,
             ):
                 continue
-            shape.fill = _is_shape_filled(shape=shape, hovered_shape=self.hovered_shape)
+            shape.fill = _is_shape_filled(
+                shape=shape,
+                hovered_shape=self.hovered_shape,
+                fill_editing=self.fill_editing(),
+            )
             shape.paint(painter)
 
     def _draw_active_shape_layer(self, painter: QtGui.QPainter) -> None:
@@ -1665,5 +1687,7 @@ def _is_shape_paintable(shape: Shape, visible: bool, hide_background: bool) -> b
     return True
 
 
-def _is_shape_filled(shape: Shape, hovered_shape: Shape | None) -> bool:
-    return shape.selected or shape is hovered_shape
+def _is_shape_filled(
+    shape: Shape, hovered_shape: Shape | None, fill_editing: bool
+) -> bool:
+    return fill_editing and (shape.selected or shape is hovered_shape)

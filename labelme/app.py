@@ -151,6 +151,7 @@ class _Actions(NamedTuple):
     zoom_org: QtWidgets.QAction
     reset_layout: QtWidgets.QAction
     fill_drawing: QtWidgets.QAction
+    fill_editing: QtWidgets.QAction
     hide_all: QtWidgets.QAction
     show_all: QtWidgets.QAction
     toggle_all: QtWidgets.QAction
@@ -637,6 +638,17 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if self._config["canvas"]["fill_drawing"]:
             fill_drawing.trigger()
+        fill_editing = action(
+            self.tr("Fill Editing Polygon"),
+            self._canvas_widgets.canvas.set_fill_editing,
+            None,
+            icon="phosphor/paint-bucket.svg",
+            tip=self.tr("Fill polygon while editing"),
+            checkable=True,
+            enabled=True,
+        )
+        if self._config["canvas"]["fill_editing"]:
+            fill_editing.trigger()
         hide_all = action(
             self.tr("&Hide\nShapes"),
             functools.partial(self.toggle_shape_visibility, False),
@@ -797,6 +809,7 @@ class MainWindow(QtWidgets.QMainWindow):
             zoom_org=zoom_org,
             reset_layout=reset_layout,
             fill_drawing=fill_drawing,
+            fill_editing=fill_editing,
             hide_all=hide_all,
             show_all=show_all,
             toggle_all=toggle_all,
@@ -879,6 +892,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._actions.reset_layout,
                 None,
                 self._actions.fill_drawing,
+                self._actions.fill_editing,
                 None,
                 self._actions.hide_all,
                 self._actions.show_all,
