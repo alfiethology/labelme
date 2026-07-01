@@ -134,6 +134,7 @@ class _Actions(NamedTuple):
     create_mode: QtWidgets.QAction
     edit_mode: QtWidgets.QAction
     create_rectangle_mode: QtWidgets.QAction
+    create_rotation_mode: QtWidgets.QAction
     create_circle_mode: QtWidgets.QAction
     create_line_mode: QtWidgets.QAction
     create_point_mode: QtWidgets.QAction
@@ -497,6 +498,14 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Start drawing rectangles"),
             enabled=False,
         )
+        create_rotation_mode = action(
+            text=self.tr("OBB Rectangle"),
+            slot=lambda: self._switch_canvas_mode(edit=False, create_mode="rotation"),
+            shortcut=shortcuts["create_rotation"],
+            icon="phosphor/rectangle.svg",
+            tip=self.tr("Draw and interactively rotate four-point bounding boxes"),
+            enabled=False,
+        )
         create_circle_mode = action(
             text=self.tr("Circle"),
             slot=lambda: self._switch_canvas_mode(edit=False, create_mode="circle"),
@@ -713,6 +722,7 @@ class MainWindow(QtWidgets.QMainWindow):
         draw = [
             ("polygon", create_mode),
             ("rectangle", create_rectangle_mode),
+            ("rotation", create_rotation_mode),
             ("circle", create_circle_mode),
             ("point", create_point_mode),
             ("line", create_line_mode),
@@ -732,6 +742,7 @@ class MainWindow(QtWidgets.QMainWindow):
             close,
             create_mode,
             create_rectangle_mode,
+            create_rotation_mode,
             create_circle_mode,
             create_line_mode,
             create_point_mode,
@@ -792,6 +803,7 @@ class MainWindow(QtWidgets.QMainWindow):
             create_mode=create_mode,
             edit_mode=edit_mode,
             create_rectangle_mode=create_rectangle_mode,
+            create_rotation_mode=create_rotation_mode,
             create_circle_mode=create_circle_mode,
             create_line_mode=create_line_mode,
             create_point_mode=create_point_mode,

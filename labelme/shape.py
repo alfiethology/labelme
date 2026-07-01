@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from collections.abc import Iterable
 from typing import Any
 from typing import Final
@@ -106,6 +107,7 @@ class Shape:
         if value not in [
             "polygon",
             "rectangle",
+            "rotation",
             "point",
             "line",
             "circle",
@@ -174,6 +176,15 @@ class Shape:
         _paint_shape(painter=painter, shape=self)
 
     def nearest_vertex(self, point: QtCore.QPointF, epsilon: float) -> int | None:
+        if self.shape_type == "rotation" and self.selected and len(self.points) == 4:
+            handle = self.rotation_handle()
+            if (
+                labelme.utils.distance(
+                    _scale_point(point=point - handle, scale=self.scale)
+                )
+                <= epsilon
+            ):
+                return 4
         return _nearest_vertex_index(
             point=point, points=self.points, scale=self.scale, epsilon=epsilon
         )
@@ -197,7 +208,58 @@ class Shape:
         return path.boundingRect()
 
     def move_vertex(self, i: int, pos: QtCore.QPointF) -> None:
+        if self.shape_type == "rotation" and len(self.points) == 4:
+            if i == 4:
+                center = sum(self.points, QtCore.QPointF()) / 4.0
+                current = self.rotation_handle() - center
+                target = pos - center
+                if target.isNull():
+                    return
+                angle = math.atan2(target.y(), target.x()) - math.atan2(
+                    current.y(), current.x()
+                )
+                cosine, sine = math.cos(angle), math.sin(angle)
+                for index, point in enumerate(self.points):
+                    offset = point - center
+                    self.points[index] = center + QtCore.QPointF(
+                        offset.x() * cosine - offset.y() * sine,
+                        offset.x() * sine + offset.y() * cosine,
+                    )
+                return
+
+            opposite = (i + 2) % 4
+            next_index = (i + 1) % 4
+            previous_index = (i - 1) % 4
+            axis_next = self.points[next_index] - self.points[i]
+            axis_previous = self.points[previous_index] - self.points[i]
+            next_length = labelme.utils.distance(axis_next)
+            previous_length = labelme.utils.distance(axis_previous)
+            if next_length == 0 or previous_length == 0:
+                return
+            axis_next /= next_length
+            axis_previous /= previous_length
+            diagonal = self.points[opposite] - pos
+            self.points[i] = pos
+            self.points[next_index] = pos + axis_next * QtCore.QPointF.dotProduct(
+                diagonal, axis_next
+            )
+            self.points[previous_index] = (
+                pos + axis_previous * QtCore.QPointF.dotProduct(diagonal, axis_previous)
+            )
+            return
         self.points[i] = pos
+
+    def rotation_handle(self) -> QtCore.QPointF:
+        """Return the transient rotation handle; it is not a saved point."""
+        if len(self.points) != 4:
+            return QtCore.QPointF()
+        edge_midpoint = (self.points[0] + self.points[1]) / 2.0
+        center = sum(self.points, QtCore.QPointF()) / 4.0
+        outward = edge_midpoint - center
+        length = labelme.utils.distance(outward)
+        if length == 0:
+            return edge_midpoint
+        return edge_midpoint + outward / length * (24.0 / self.scale)
 
     def translate(self, offset: QtCore.QPointF) -> None:
         for i, point in enumerate(self.points):
@@ -239,6 +301,13 @@ def _build_rectangle_path(*, points: list[QtCore.QPointF]) -> QtGui.QPainterPath
     return out
 
 
+def _build_rotation_path(*, points: list[QtCore.QPointF]) -> QtGui.QPainterPath:
+    out = _build_polyline_path(points=points)
+    if len(points) == 4:
+        out.closeSubpath()
+    return out
+
+
 def _build_circle_path(*, points: list[QtCore.QPointF]) -> QtGui.QPainterPath:
     out = QtGui.QPainterPath()
     if len(points) == 2:
@@ -263,6 +332,7 @@ class _PathBuilder(Protocol):
 
 _PATH_BUILDERS: Final[dict[str, _PathBuilder]] = {
     "rectangle": _build_rectangle_path,
+    "rotation": _build_rotation_path,
     "mask": _build_rectangle_path,
     "circle": _build_circle_path,
 }
@@ -451,6 +521,20 @@ def _paint_points(*, painter: QtGui.QPainter, shape: Shape) -> None:
         negative_vrtx_path=negative_vrtx_path,
     )
 
+    if shape.shape_type == "rotation" and shape.selected and len(shape.points) == 4:
+        handle = _scale_point(point=shape.rotation_handle(), scale=shape.scale)
+        edge_midpoint = _scale_point(
+            point=(shape.points[0] + shape.points[1]) / 2.0, scale=shape.scale
+        )
+        line_path.moveTo(edge_midpoint)
+        line_path.lineTo(handle)
+        _add_vertex_to_path(
+            vrtx_path,
+            pos=handle,
+            size=shape.point_size,
+            point_type=_P_ROUND,
+        )
+
     painter.drawPath(line_path)
     if vrtx_path.length() > 0:
         vertex_fill = (
@@ -491,6 +575,19 @@ def _build_shape_paths(
         if shape.shape_type == "rectangle":
             for i in range(len(shape.points)):
                 _add_shape_vertex(vrtx_path, shape=shape, vertex_index=i)
+    elif shape.shape_type == "rotation":
+        # A newly started OBB temporarily uses a two-point cursor guide.
+        assert len(shape.points) in [1, 2, 4]
+        if len(shape.points) == 2:
+            line_path.moveTo(_scale_point(point=shape.points[0], scale=shape.scale))
+            line_path.lineTo(_scale_point(point=shape.points[1], scale=shape.scale))
+        if len(shape.points) == 4:
+            line_path.moveTo(_scale_point(point=shape.points[0], scale=shape.scale))
+            for point in shape.points[1:]:
+                line_path.lineTo(_scale_point(point=point, scale=shape.scale))
+            line_path.closeSubpath()
+        for i in range(len(shape.points)):
+            _add_shape_vertex(vrtx_path, shape=shape, vertex_index=i)
     elif shape.shape_type == "circle":
         assert len(shape.points) in [1, 2]
         if len(shape.points) == 2:

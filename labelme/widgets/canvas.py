@@ -106,6 +106,7 @@ class Canvas(QtWidgets.QWidget):
             {
                 "polygon": False,
                 "rectangle": True,
+                "rotation": True,
                 "circle": False,
                 "line": False,
                 "point": False,
@@ -181,6 +182,7 @@ class Canvas(QtWidgets.QWidget):
         if value not in [
             "polygon",
             "rectangle",
+            "rotation",
             "circle",
             "line",
             "point",
@@ -388,6 +390,10 @@ class Canvas(QtWidgets.QWidget):
                 return self.tr("Click first corner for rectangle")
             else:
                 return self.tr("Click opposite corner for rectangle (Shift for square)")
+        if self.create_mode == "rotation":
+            if is_new:
+                return self.tr("Click first corner for OBB rectangle")
+            return self.tr("Click opposite corner for OBB rectangle (Shift for square)")
         return self.tr("Click to add point")
 
     def mouseMoveEvent(self, a0: QtGui.QMouseEvent) -> None:
@@ -495,12 +501,22 @@ class Canvas(QtWidgets.QWidget):
                 current.point_labels[-1],
                 0 if is_shift_pressed else 1,
             ]
-        elif mode in ("rectangle", "ai_box_to_shape"):
+        elif mode in ("rectangle", "rotation", "ai_box_to_shape"):
             if is_shift_pressed:
                 pos = _snap_cursor_pos_for_square(pos=pos, opposite_vertex=current[0])
                 self.prev_move_point = pos
-            self.line.points = [current[0], pos]
-            self.line.point_labels = [1, 1]
+            if mode == "rotation":
+                p0 = current[0]
+                self.line.points = [
+                    p0,
+                    QPointF(pos.x(), p0.y()),
+                    pos,
+                    QPointF(p0.x(), pos.y()),
+                ]
+                self.line.point_labels = [1, 1, 1, 1]
+            else:
+                self.line.points = [current[0], pos]
+                self.line.point_labels = [1, 1]
             self.line.close()
         elif mode == "circle":
             self.line.points = [current[0], pos]
@@ -736,9 +752,10 @@ class Canvas(QtWidgets.QWidget):
             self.line[0] = current[-1]
             if current.is_closed():
                 self.finalise()
-        elif mode in ("rectangle", "circle", "line", "ai_box_to_shape"):
+        elif mode in ("rectangle", "rotation", "circle", "line", "ai_box_to_shape"):
             assert len(current.points) == 1
             current.points = self.line.points
+            current.point_labels = self.line.point_labels
             self.finalise()
         elif mode == "linestrip":
             current.add_point(self.line[1])
@@ -1038,6 +1055,9 @@ class Canvas(QtWidgets.QWidget):
     def bounded_move_vertex(
         self, shape: Shape, vertex_index: int, pos: QPointF, is_shift_pressed: bool
     ) -> None:
+        if shape.shape_type == "rotation" and vertex_index == 4:
+            shape.move_vertex(i=vertex_index, pos=pos)
+            return
         if vertex_index >= len(shape.points):
             logger.warning(
                 "vertex_index is out of range: vertex_index={:d}, len(points)={:d}",

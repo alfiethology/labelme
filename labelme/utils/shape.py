@@ -37,6 +37,9 @@ def shape_to_mask(
             outline=1,
             fill=1,
         )
+    elif shape_type == "rotation":
+        assert len(xy) == 4, "Shape of shape_type=rotation must have 4 points"
+        draw.polygon(xy=xy, outline=1, fill=1)  # ty: ignore[invalid-argument-type]
     elif shape_type == "line":
         assert len(xy) == 2, "Shape of shape_type=line must have 2 points"
         draw.line(xy=xy, fill=1, width=line_width)  # ty: ignore[invalid-argument-type]

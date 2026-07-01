@@ -69,6 +69,7 @@ canvas:
   crosshair:
     polygon: false
     rectangle: true
+    rotation: true
     circle: false
     line: false
     point: false
@@ -93,6 +94,7 @@ shortcuts:
   fit_width: Ctrl+Shift+F
   create_polygon: Ctrl+N
   create_rectangle: Ctrl+R
+  create_rotation: Ctrl+Shift+R
   create_circle:
   create_line:
   create_point:
