@@ -1678,7 +1678,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def remove_labels(self, shapes: list[Shape]) -> None:
         self._docks.label_list.item_dropped.disconnect(self._on_label_order_changed)
         for shape in shapes:
-            item = self._docks.label_list.find_item_by_shape(shape)
+            try:
+                item = self._docks.label_list.find_item_by_shape(shape)
+            except ValueError:
+                # Shape may already be removed from the list (e.g. repeated delete path).
+                continue
             self._docks.label_list.remove_item(item)
         self._docks.label_list.item_dropped.connect(self._on_label_order_changed)
 
@@ -2509,6 +2513,18 @@ class MainWindow(QtWidgets.QMainWindow):
         return str(Path(self._image_path).parent) if self._image_path else "."
 
     def remove_selected_point(self) -> None:
+        canvas = self._canvas_widgets.canvas
+        shape = canvas.hovered_shape
+        if shape is not None and shape.shape_type == "point" and canvas.is_vertex_selected():
+            canvas.delete_shape(shape)
+            self.remove_labels([shape])
+            canvas.update()
+            self.mark_dirty()
+            if self.has_no_shapes():
+                for action in self._actions.on_shapes_present:
+                    action.setEnabled(False)
+            return
+
         self._canvas_widgets.canvas.remove_selected_point()
         self._canvas_widgets.canvas.update()
         if (
@@ -2678,8 +2694,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._zoom_rect_button.setChecked(checked)
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
+        canvas = self._canvas_widgets.canvas
         if event.key() == Qt.Key_Z:
             self.toggle_zoom_rect()
+            event.accept()
+            return
+        if (
+            event.key() == Qt.Key_Backspace
+            and canvas.editing()
+            and canvas.is_vertex_selected()
+        ):
+            self.remove_selected_point()
             event.accept()
             return
         super().keyPressEvent(event)
