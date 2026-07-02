@@ -34,6 +34,7 @@ dependencies = [
   "scikit-image>=0.21",
   "tifffile>=2024.1.30",
   "ruamel-yaml>=0.18",
+  "ultralytics>=8.3",
 ]
 dynamic = ["readme", "version"]
 

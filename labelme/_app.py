@@ -50,6 +50,7 @@ from ._widgets import AiAssistedAnnotationWidget
 from ._widgets import AiTextToAnnotationWidget
 from ._widgets import BrightnessContrastDialog
 from ._widgets import Canvas
+from ._widgets import CustomYoloWidget
 from ._widgets import LabelDialog
 from ._widgets import LabelListWidget
 from ._widgets import LabelListWidgetItem
@@ -247,6 +248,10 @@ class MainWindow(QtWidgets.QMainWindow):
             on_submit=self._submit_ai_prompt, parent=self
         )
         self._ai_text.setEnabled(False)
+
+        self._custom_yolo = CustomYoloWidget(on_run=self._run_custom_yolo, parent=self)
+        self._custom_yolo_model: object | None = None
+        self._custom_yolo_model_path: Path | None = None
 
         self._setup_toolbars()
 
@@ -971,6 +976,9 @@ class MainWindow(QtWidgets.QMainWindow):
         ai_prompt_action = QtWidgets.QWidgetAction(self)
         ai_prompt_action.setDefaultWidget(self._ai_text)
 
+        custom_yolo_action = QtWidgets.QWidgetAction(self)
+        custom_yolo_action.setDefaultWidget(self._custom_yolo)
+
         self.addToolBar(
             Qt.ToolBarArea.TopToolBarArea,
             ToolBar(
@@ -995,6 +1003,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     select_ai_model,
                     None,
                     ai_prompt_action,
+                    None,
+                    custom_yolo_action,
                 ],
                 font_base=self.font(),
             ),
@@ -1019,6 +1029,93 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._ai_annotation.hover_highlight_requested.connect(
             self._highlight_ai_buttons
+        )
+
+    def _run_custom_yolo(self) -> None:
+        if self._image.isNull() or self._image_path is None:
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Custom YOLO"),
+                self.tr("Open an image before running detection."),
+            )
+            return
+
+        model_path = self._custom_yolo.model_path
+        if not model_path.is_file():
+            QtWidgets.QMessageBox.warning(
+                self,
+                self.tr("Custom YOLO"),
+                self.tr("Model file does not exist:\n{}").format(model_path),
+            )
+            return
+
+        self.show_status_message(self.tr("Running custom YOLO detector…"), 0)
+        QtWidgets.QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QtWidgets.QApplication.processEvents()
+        try:
+            from ultralytics import YOLO
+
+            if (
+                self._custom_yolo_model is None
+                or self._custom_yolo_model_path != model_path
+            ):
+                self._custom_yolo_model = YOLO(str(model_path))
+                self._custom_yolo_model_path = model_path
+
+            model = typing.cast(typing.Any, self._custom_yolo_model)
+            image = _utils.img_qt_to_arr(self._image)[:, :, :3]
+            results = model.predict(
+                source=image,
+                conf=self._custom_yolo.confidence,
+                verbose=False,
+            )
+            result = results[0]
+            boxes = result.boxes
+            xyxy = boxes.xyxy.detach().cpu().numpy()
+            confidences = boxes.conf.detach().cpu().numpy()
+            class_ids = boxes.cls.detach().cpu().numpy().astype(int)
+            names = result.names
+        except Exception as error:
+            logger.opt(exception=error).error("Custom YOLO inference failed")
+            QtWidgets.QMessageBox.critical(
+                self,
+                self.tr("Custom YOLO Failed"),
+                self.tr("{}: {}").format(type(error).__name__, error),
+            )
+            return
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+        shapes = [
+            Shape(
+                label=str(names[int(class_id)]),
+                shape_type="rectangle",
+                points=np.asarray(
+                    [[box[0], box[1]], [box[2], box[3]]], dtype=np.float64
+                ),
+                flags={},
+                description=json.dumps(
+                    {
+                        "confidence": float(confidence),
+                        "model": str(model_path),
+                    }
+                ),
+                closed=True,
+            )
+            for box, confidence, class_id in zip(
+                xyxy, confidences, class_ids, strict=True
+            )
+        ]
+        if not shapes:
+            self.show_status_message(self.tr("Custom YOLO found no objects."), 5000)
+            return
+
+        self._canvas_widgets.canvas.backup_shapes()
+        self._load_shapes(shapes, replace=False)
+        self.mark_dirty()
+        self.show_status_message(
+            self.tr("Custom YOLO added {} bounding boxes.").format(len(shapes)),
+            5000,
         )
 
     def _setup_app_state(
