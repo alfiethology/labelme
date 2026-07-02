@@ -13,8 +13,8 @@ from labelme._automation._types import AiOutputFormat
 
 from ..conftest import assert_labelfile_sanity
 from ..conftest import close_or_pause
-from .conftest import click_canvas_fraction
 from .conftest import MainWinFactory
+from .conftest import click_canvas_fraction
 from .conftest import show_window_and_wait_for_imagedata
 from .conftest import submit_label_dialog
 
