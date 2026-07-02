@@ -64,7 +64,7 @@ fit_to_content:
 epsilon: 10.0
 canvas:
   fill_drawing: true
-  fill_editing: false
+  fill_editing: true
   show_center_dots: false
   # None: do nothing
   # close: close polygon
