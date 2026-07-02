@@ -7,11 +7,11 @@ from typing import Final
 
 import numpy as np
 import pytest
-from PyQt5.QtCore import QTimer
+from PySide6.QtCore import QTimer
 from pytestqt.qtbot import QtBot
 
-from labelme import utils
-from labelme.app import MainWindow
+from labelme import _utils
+from labelme._app import MainWindow
 
 from ..conftest import close_or_pause
 from .conftest import MainWinFactory
@@ -56,7 +56,7 @@ def test_save_image_data_field_matches_config(
         data = json.load(f)
     if with_image_data:
         assert isinstance(data["imageData"], str) and data["imageData"]
-        decoded = utils.img_b64_to_arr(data["imageData"])
+        decoded = _utils.img_b64_to_arr(data["imageData"])
         assert decoded.shape[0] == data["imageHeight"]
         assert decoded.shape[1] == data["imageWidth"]
     else:
@@ -84,7 +84,7 @@ def test_round_trip_polygon_preserves_points(
     saved_shape = next(
         s for s in raw_win._canvas_widgets.canvas.shapes if s.label == label
     )
-    saved_points = [(p.x(), p.y()) for p in saved_shape.points]
+    saved_points = [(float(p[0]), float(p[1])) for p in saved_shape.points]
 
     raw_win.save_labels(label_path=str(label_path))
     assert label_path.exists()
@@ -99,7 +99,7 @@ def test_round_trip_polygon_preserves_points(
     )
 
     reopened = next(s for s in canvas2.shapes if s.label == label)
-    reopened_points = [(p.x(), p.y()) for p in reopened.points]
+    reopened_points = [(float(p[0]), float(p[1])) for p in reopened.points]
 
     assert reopened.shape_type == "polygon"
     assert len(reopened_points) == len(saved_points)
@@ -120,7 +120,7 @@ def test_round_trip_mask_shape_via_fixture(
 ) -> None:
     mask_arr = np.zeros((4, 4), dtype=np.uint8)
     mask_arr[1:3, 1:3] = 1
-    mask_b64 = utils.img_arr_to_b64(mask_arr)
+    mask_b64 = _utils.img_arr_to_b64(mask_arr)
 
     raw_image_path = data_path / _RAW_FILE_NAME
     fixture_json = tmp_path / "mask_fixture.json"
@@ -214,7 +214,7 @@ def test_open_json_with_missing_image_shows_error_and_recovers(
     raw_win._load_file(str(missing_image_json))
 
     raw_win._load_file(str(data_path / _RAW_FILE_NAME))
-    qtbot.waitUntil(lambda: raw_win._image_data is not None, timeout=5_000)
+    qtbot.waitUntil(lambda: raw_win._annotation is not None, timeout=5_000)
 
     close_or_pause(qtbot=qtbot, widget=raw_win, pause=pause)
 

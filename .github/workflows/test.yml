@@ -10,7 +10,7 @@ jobs:
     strategy:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
-        python-version: ['3.10', '3.14']
+        python-version: ['3.12', '3.13', '3.14']
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -23,7 +23,7 @@ jobs:
       - uses: awalsh128/cache-apt-pkgs-action@v1
         if: matrix.os == 'ubuntu-latest'
         with:
-          packages: xvfb libqt5widgets5
+          packages: xvfb libegl1 libxkbcommon0 libxcb-cursor0 libgl1
           version: 1.0
       - name: Test
         shell: bash
@@ -42,6 +42,8 @@ jobs:
         run: |
           labelme --help
           labelme --version
+          # examples/ must stay self-contained: no labelme imports (#2231)
+          ! grep -rnE "import labelme|from labelme" examples/
           (cd examples/primitives && ../tutorial/export_json.py primitives.json && rm -rf primitives)
           (cd examples/tutorial && rm -rf apc2016_obj3_json && ./export_json.py apc2016_obj3.json && python load_label_png.py && git checkout -- .)
           (cd examples/semantic_segmentation && rm -rf data_dataset_voc && ./labelme2voc.py data_annotated data_dataset_voc --labels labels.txt && git checkout -- .)

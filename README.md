@@ -88,6 +88,55 @@ On some Linux distributions, labelme is also packaged in the system's native rep
 
 [![Packaging status](https://repology.org/badge/vertical-allrepos/labelme.svg)](https://repology.org/project/labelme/versions)
 
+### Supported Python and platforms
+
+|        | Supported (v7.x)               | Maintenance (v6.3.x) |
+| ------ | ------------------------------ | -------------------- |
+| Python | 3.12 - 3.14                    | 3.10 - 3.11          |
+| Qt     | Qt6 (PySide6)                  | Qt5                  |
+| OS     | 64-bit macOS / Windows / Linux | older OSes           |
+
+labelme follows [SPEC 0](https://scientific-python.org/specs/spec-0000/) (the successor to [NEP 29](https://numpy.org/neps/nep-0029-deprecation_policy.html)) for dropping Python versions, in step with its core scientific dependencies (numpy, scipy, scikit-image). v6.3.x is the maintenance line for Qt5 and Python 3.10 / 3.11 stragglers.
+
+v6.3.x receives critical fixes only, on a best-effort basis with no release cadence or SLA. "Critical" is limited to:
+
+- security vulnerabilities,
+- data-loss or annotation-corruption bugs,
+- install or launch breakage caused by upstream dependency drift.
+
+Feature backports and non-critical bugs are out of scope; all new development happens on v7.x.
+
+### Upgrading from v6.x to v7
+
+v7.0.0 raises the platform floor:
+
+- **Qt binding:** the GUI moved from PyQt5 (Qt5) to PySide6 (Qt6). `pip install labelme` now pulls PySide6 instead of PyQt5.
+- **Python:** the minimum is now Python 3.12 (3.10 and 3.11 are dropped).
+- **OS:** Qt6 requires a 64-bit macOS, Windows, or Linux; older OSes that only Qt5 supported are no longer covered.
+- **No public Python API:** labelme is an application, not a library, and exposes no stable Python API. Its internal modules were privatized in v7 (renamed to underscore-prefixed names), so `import labelme.app`, `labelme.utils`, `labelme.widgets`, and similar imports no longer work. If you previously imported labelme internals, pin `labelme<7` and vendor the code you need; see [`examples/utils.py`](examples/utils.py) for copy-and-adapt reference code that reads the JSON annotation format without depending on labelme.
+
+If you need to stay on PyQt5/Qt5, Python 3.10 or 3.11, or an older OS, pin to the v6.3.x maintenance line:
+
+```bash
+pip install 'labelme<7'
+```
+
+All previous releases remain installable from [PyPI](https://pypi.org/project/labelme/#history), so existing pins keep working.
+
+v7.0.0 also changes config parsing:
+
+- **Config booleans:** `~/.labelmerc` is now parsed with ruamel.yaml (YAML 1.2), so the boolean spellings `yes`/`no`/`on`/`off` (in any capitalization) are read as strings rather than booleans. If you set any boolean option this way, switch it to `true`/`false`.
+
+### Public interface
+
+labelme is an application. The interfaces you can build on and that we keep stable are:
+
+- the **command-line interface** (`labelme ...`),
+- the **on-disk JSON annotation format**, and
+- the **`~/.labelmerc` config format**.
+
+Everything else, including the Python import surface, is internal and may change or be renamed without notice. To consume annotations from your own code, read the JSON format directly (see [`examples/utils.py`](examples/utils.py)).
+
 ## Usage
 
 Run `labelme --help` for detail.\
@@ -113,8 +162,8 @@ labelme data_annotated/ --labels labels.txt  # specify label list with a file
 ### Command Line Arguments
 
 - `--output` specifies the location that annotations will be written to. If the location ends with .json, a single annotation will be written to this file. Only one image can be annotated if a location is specified with .json. If the location does not end with .json, the program will assume it is a directory. Annotations will be stored in this directory with a name that corresponds to the image that the annotation was made on.
-- The first time you run labelme, it will create a config file at `~/.labelmerc`. Add only the settings you want to override. For all available options and their defaults, see [`default_config.yaml`](labelme/config/default_config.yaml). If you would prefer to use a config file from another location, you can specify this file with the `--config` flag.
-- Without the `--nosortlabels` flag, the program will list labels in alphabetical order. When the program is run with this flag, it will display labels in the order that they are provided.
+- The first time you run labelme, it will create a config file at `~/.labelmerc`. Add only the settings you want to override. For all available options and their defaults, see [`default_config.yaml`](labelme/_config/default_config.yaml). If you would prefer to use a config file from another location, you can specify this file with the `--config` flag.
+- Without the `--no-sort-labels` flag, the program will list labels in alphabetical order. When the program is run with this flag, it will display labels in the order that they are provided.
 - Flags are assigned to an entire image. [Example](examples/classification)
 - Labels are assigned to a single polygon. [Example](examples/bbox_detection)
 
@@ -138,14 +187,13 @@ labelme data_annotated/ --labels labels.txt  # specify label list with a file
 ```bash
 LABELME_PATH=./labelme
 OSAM_PATH=$(python -c 'import os, osam; print(os.path.dirname(osam.__file__))')
-pip install 'numpy<2.0'  # numpy>=2.0 causes build errors (see #1532)
 pyinstaller labelme/labelme/__main__.py \
   --name=Labelme \
   --windowed \
   --noconfirm \
   --specpath=build \
   --add-data=$(OSAM_PATH)/_models/yoloworld/clip/bpe_simple_vocab_16e6.txt.gz:osam/_models/yoloworld/clip \
-  --add-data=$(LABELME_PATH)/config/default_config.yaml:labelme/config \
+  --add-data=$(LABELME_PATH)/_config/default_config.yaml:labelme/_config \
   --add-data=$(LABELME_PATH)/icons/*:labelme/icons \
   --add-data=$(LABELME_PATH)/translate/*:translate \
   --icon=$(LABELME_PATH)/icons/icon-256.png \

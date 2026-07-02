@@ -6,17 +6,20 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 
-from labelme._label_file import LabelFile
+from labelme._label_file import Annotation
 from labelme._label_file import LabelFileReadError
 from labelme._label_file import LabelFileWriteError
+from labelme._label_file import ShapeDict
+from labelme._label_file import _normalize_to_uint8
 from labelme._label_file import read_label_file
 from labelme._label_file import write_label_file
 
 
-def test_LabelFile_load_windows_path(data_path: Path, tmp_path: Path) -> None:
-    """Test that LabelFile can load JSON with Windows-style backslash paths.
+def test_read_label_file_load_windows_path(data_path: Path, tmp_path: Path) -> None:
+    """Test that read_label_file loads JSON with Windows-style backslash paths.
 
     Regression test for https://github.com/wkentaro/labelme/issues/1725
     """
@@ -34,45 +37,9 @@ def test_LabelFile_load_windows_path(data_path: Path, tmp_path: Path) -> None:
     with open(json_file, "w") as f:
         json.dump(json_data, f)
 
-    label_file = LabelFile(str(json_file))
-    assert label_file.image_path == "../images/2011_000003.jpg"
-    assert label_file.image_data is not None
-
-
-def test_LabelFile_imagePath_deprecation() -> None:
-    label_file = LabelFile()
-    label_file.image_path = "foo.jpg"
-
-    with pytest.warns(DeprecationWarning, match="image_path"):
-        assert label_file.imagePath == "foo.jpg"
-
-    with pytest.warns(DeprecationWarning, match="image_path"):
-        label_file.imagePath = "bar.jpg"
-    assert label_file.image_path == "bar.jpg"
-
-
-def test_LabelFile_imageData_deprecation() -> None:
-    label_file = LabelFile()
-    label_file.image_data = b"foo"
-
-    with pytest.warns(DeprecationWarning, match="image_data"):
-        assert label_file.imageData == b"foo"
-
-    with pytest.warns(DeprecationWarning, match="image_data"):
-        label_file.imageData = b"bar"
-    assert label_file.image_data == b"bar"
-
-
-def test_LabelFile_otherData_deprecation() -> None:
-    label_file = LabelFile()
-    label_file.other_data = {"foo": 1}
-
-    with pytest.warns(DeprecationWarning, match="other_data"):
-        assert label_file.otherData == {"foo": 1}
-
-    with pytest.warns(DeprecationWarning, match="other_data"):
-        label_file.otherData = {"bar": 2}
-    assert label_file.other_data == {"bar": 2}
+    annotation = read_label_file(filename=str(json_file))
+    assert annotation.image_path == "../images/2011_000003.jpg"
+    assert annotation.image_data is not None
 
 
 @pytest.fixture()
@@ -154,16 +121,19 @@ def test_write_label_file_round_trips(data_path: Path, tmp_path: Path) -> None:
     src = read_label_file(filename=str(data_path / "annotated" / "2011_000003.json"))
     dst = tmp_path / "out.json"
 
-    shapes: list[dict[str, Any]] = [{**s} for s in src.shapes]
+    annotation = Annotation(
+        image_path=src.image_path,
+        image_data=src.image_data,
+        shapes=src.shapes,
+        flags={"ok": True},
+        other_data={"customField": 42},
+    )
     write_label_file(
         filename=str(dst),
-        shapes=shapes,
-        image_path=src.image_path,
+        annotation=annotation,
         image_height=None,
         image_width=None,
-        image_data=src.image_data,
-        other_data={"customField": 42},
-        flags={"ok": True},
+        save_image_data=True,
     )
 
     reloaded = read_label_file(filename=str(dst))
@@ -173,6 +143,48 @@ def test_write_label_file_round_trips(data_path: Path, tmp_path: Path) -> None:
     assert [(s["label"], s["points"], s["shape_type"]) for s in reloaded.shapes] == [
         (s["label"], s["points"], s["shape_type"]) for s in src.shapes
     ]
+
+
+def test_write_label_file_round_trips_mask_shape(
+    data_path: Path, annotated_dst: Path
+) -> None:
+    src = read_label_file(filename=str(data_path / "annotated" / "2011_000003.json"))
+    mask = np.zeros((4, 5), dtype=bool)
+    mask[1:3, 2:4] = True
+    shape = ShapeDict(
+        label="thing",
+        points=[[2.0, 1.0], [3.0, 2.0]],
+        shape_type="mask",
+        flags={"verified": True},
+        description="d",
+        group_id=7,
+        mask=mask,
+        other_data={"score": 0.5},
+    )
+    annotation = Annotation(
+        image_path=src.image_path,
+        image_data=src.image_data,
+        shapes=[shape],
+        flags={},
+        other_data={},
+    )
+    write_label_file(
+        filename=str(annotated_dst),
+        annotation=annotation,
+        image_height=None,
+        image_width=None,
+        save_image_data=True,
+    )
+
+    [reloaded_shape] = read_label_file(filename=str(annotated_dst)).shapes
+    assert reloaded_shape["label"] == "thing"
+    assert reloaded_shape["shape_type"] == "mask"
+    assert reloaded_shape["group_id"] == 7
+    assert reloaded_shape["description"] == "d"
+    assert reloaded_shape["flags"] == {"verified": True}
+    assert reloaded_shape["other_data"] == {"score": 0.5}
+    assert reloaded_shape["mask"] is not None
+    assert np.array_equal(reloaded_shape["mask"], mask)
 
 
 @pytest.mark.parametrize(
@@ -190,14 +202,20 @@ def test_write_label_file_round_trips(data_path: Path, tmp_path: Path) -> None:
 def test_write_label_file_rejects_reserved_other_data_key(
     tmp_path: Path, reserved_key: str
 ) -> None:
+    annotation = Annotation(
+        image_path="foo.jpg",
+        image_data=b"",
+        shapes=[],
+        flags={},
+        other_data={reserved_key: "x"},
+    )
     with pytest.raises(LabelFileWriteError, match=f"reserved key.*{reserved_key}"):
         write_label_file(
             filename=str(tmp_path / "out.json"),
-            shapes=[],
-            image_path="foo.jpg",
+            annotation=annotation,
             image_height=None,
             image_width=None,
-            other_data={reserved_key: "x"},
+            save_image_data=False,
         )
 
 
@@ -205,26 +223,66 @@ def test_write_label_file_raises_on_dimension_mismatch(
     data_path: Path, tmp_path: Path
 ) -> None:
     src = read_label_file(filename=str(data_path / "annotated" / "2011_000003.json"))
+    annotation = Annotation(
+        image_path="foo.jpg",
+        image_data=src.image_data,
+        shapes=[],
+        flags={},
+        other_data={},
+    )
 
     with pytest.raises(LabelFileWriteError, match="imageHeight mismatch"):
         write_label_file(
             filename=str(tmp_path / "out.json"),
-            shapes=[],
-            image_path="foo.jpg",
+            annotation=annotation,
             image_height=1,
             image_width=None,
-            image_data=src.image_data,
+            save_image_data=True,
         )
 
 
 def test_write_label_file_raises_write_error_on_io_failure(tmp_path: Path) -> None:
     bad_path = tmp_path / "missing_dir" / "out.json"
+    annotation = Annotation(
+        image_path="foo.jpg",
+        image_data=b"",
+        shapes=[],
+        flags={},
+        other_data={},
+    )
 
     with pytest.raises(LabelFileWriteError, match="failed to write"):
         write_label_file(
             filename=str(bad_path),
-            shapes=[],
-            image_path="foo.jpg",
+            annotation=annotation,
             image_height=None,
             image_width=None,
+            save_image_data=False,
         )
+
+
+def test_normalize_to_uint8_scales_finite_range() -> None:
+    result = _normalize_to_uint8(np.array([[0.0, 50.0, 100.0]]))
+    assert result.dtype == np.uint8
+    np.testing.assert_array_equal(result, [[0, 127, 255]])
+
+
+def test_normalize_to_uint8_constant_array_returns_zeros() -> None:
+    result = _normalize_to_uint8(np.full((2, 2), 42.0))
+    np.testing.assert_array_equal(result, np.zeros((2, 2), dtype=np.uint8))
+
+
+def test_normalize_to_uint8_all_non_finite_returns_zeros() -> None:
+    result = _normalize_to_uint8(np.full((2, 2), np.nan))
+    np.testing.assert_array_equal(result, np.zeros((2, 2), dtype=np.uint8))
+
+
+def test_normalize_to_uint8_maps_non_finite_pixels_deterministically() -> None:
+    """Regression: an inf pixel made the max inf, so finite/inf == 0 turned every
+    finite pixel black. Non-finite pixels must saturate instead: +inf -> 255,
+    -inf -> 0, nan -> 0, leaving finite pixels scaled over the finite range.
+    """
+    result = _normalize_to_uint8(
+        np.array([[0.0, 50.0, 100.0, np.inf, -np.inf, np.nan]])
+    )
+    np.testing.assert_array_equal(result, [[0, 127, 255, 255, 0, 0]])

@@ -4,13 +4,11 @@ import base64
 import io
 import json
 import time
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from pathlib import PureWindowsPath
 from typing import Any
 from typing import Final
-from typing import TypedDict
 
 import numpy as np
 import PIL.Image
@@ -19,20 +17,11 @@ from loguru import logger
 from numpy.typing import NDArray
 
 from labelme import __version__
-from labelme import utils
+
+from . import _utils
+from ._utils.shape import ShapeDict
 
 PIL.Image.MAX_IMAGE_PIXELS = None
-
-
-class ShapeDict(TypedDict):
-    label: str
-    points: list[list[float]]
-    shape_type: str
-    flags: dict[str, bool]
-    description: str
-    group_id: int | None
-    mask: NDArray[np.bool_] | None
-    other_data: dict
 
 
 def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
@@ -72,6 +61,10 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
     if not isinstance(shape_json_obj["shape_type"], str):
         raise TypeError(f"shape_type must be str: {shape_json_obj['shape_type']}")
     shape_type: str = shape_json_obj["shape_type"]
+    if shape_type == "rotation":
+        # Compatibility with OBB annotations produced by this fork before
+        # upstream standardized the name.
+        shape_type = "oriented_rectangle"
 
     flags: dict = {}
     if shape_json_obj.get("flags") is not None:
@@ -104,7 +97,7 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
             raise TypeError(
                 f"mask must be base64-encoded PNG: {shape_json_obj['mask']}"
             )
-        mask = utils.img_b64_to_arr(shape_json_obj["mask"]).astype(bool)
+        mask = _utils.img_b64_to_arr(shape_json_obj["mask"]).astype(bool)
 
     other_data = {k: v for k, v in shape_json_obj.items() if k not in SHAPE_KEYS}
 
@@ -125,6 +118,22 @@ def _load_shape_json_obj(shape_json_obj: dict) -> ShapeDict:
     return loaded
 
 
+def _dump_shape_to_json_obj(shape: ShapeDict) -> dict[str, Any]:
+    json_obj: dict[str, Any] = dict(shape["other_data"])
+    json_obj.update(
+        label=shape["label"],
+        points=[list(point) for point in shape["points"]],
+        group_id=shape["group_id"],
+        description=shape["description"],
+        shape_type=shape["shape_type"],
+        flags=shape["flags"],
+        mask=None
+        if shape["mask"] is None
+        else _utils.img_arr_to_b64(shape["mask"].astype(np.uint8)),
+    )
+    return json_obj
+
+
 class LabelFileError(Exception):
     """Base for read/write failures of labelme JSON annotation files."""
 
@@ -138,7 +147,7 @@ class LabelFileWriteError(LabelFileError):
 
 
 @dataclass(frozen=True)
-class LabelData:
+class Annotation:
     image_path: str
     image_data: bytes
     shapes: list[ShapeDict]
@@ -167,7 +176,7 @@ def read_image_file(filename: str) -> bytes:
     t_start = time.time()
     image_pil = _imread(filename=filename)
 
-    oriented: PIL.Image.Image = utils.apply_exif_orientation(image=image_pil)
+    oriented: PIL.Image.Image = _utils.apply_exif_orientation(image=image_pil)
     ext = Path(filename).suffix.lower()
     if oriented is image_pil and ext in (".jpg", ".jpeg", ".png"):
         with open(filename, "rb") as f:
@@ -193,7 +202,7 @@ def _check_image_dimensions(
 ) -> None:
     if expected_height is None and expected_width is None:
         return
-    actual_w, actual_h = utils.img_data_to_pil(img_data=image_data).size
+    actual_w, actual_h = _utils.img_data_to_pil(img_data=image_data).size
     if expected_height is not None and expected_height != actual_h:
         raise ValueError(
             f"imageHeight mismatch: declared={expected_height}, actual={actual_h}"
@@ -204,7 +213,7 @@ def _check_image_dimensions(
         )
 
 
-def read_label_file(filename: str) -> LabelData:
+def read_label_file(filename: str) -> Annotation:
     try:
         with open(filename, encoding="utf-8") as f:
             raw: dict[str, Any] = json.load(f)
@@ -234,7 +243,7 @@ def read_label_file(filename: str) -> LabelData:
     ) as e:
         raise LabelFileReadError(f"failed to load {filename!r}: {e}") from e
     other_data = {k: v for k, v in raw.items() if k not in _RESERVED_TOP_LEVEL_KEYS}
-    return LabelData(
+    return Annotation(
         image_path=image_path,
         image_data=image_data,
         shapes=shapes,
@@ -245,35 +254,32 @@ def read_label_file(filename: str) -> LabelData:
 
 def write_label_file(
     filename: str,
+    annotation: Annotation,
     *,
-    shapes: list[dict[str, Any]],
-    image_path: str,
     image_height: int | None,
     image_width: int | None,
-    image_data: bytes | None = None,
-    other_data: dict[str, Any] | None = None,
-    flags: dict[str, bool] | None = None,
+    save_image_data: bool,
 ) -> None:
     try:
         image_data_b64: str | None = None
-        if image_data is not None:
+        if save_image_data:
             _check_image_dimensions(
-                image_data=image_data,
+                image_data=annotation.image_data,
                 expected_height=image_height,
                 expected_width=image_width,
             )
-            image_data_b64 = base64.b64encode(image_data).decode("utf-8")
+            image_data_b64 = base64.b64encode(annotation.image_data).decode("utf-8")
         # JSON keys stay camelCase: changing them would break existing .json files.
         payload: dict[str, Any] = {
             "version": __version__,
-            "flags": dict(flags) if flags else {},
-            "shapes": list(shapes),
-            "imagePath": image_path,
+            "flags": dict(annotation.flags) if annotation.flags else {},
+            "shapes": [_dump_shape_to_json_obj(shape) for shape in annotation.shapes],
+            "imagePath": annotation.image_path,
             "imageData": image_data_b64,
             "imageHeight": image_height,
             "imageWidth": image_width,
         }
-        for key, value in (other_data or {}).items():
+        for key, value in annotation.other_data.items():
             if key in _RESERVED_TOP_LEVEL_KEYS:
                 raise ValueError(f"reserved key in other_data: {key!r}")
             payload[key] = value
@@ -281,121 +287,6 @@ def write_label_file(
             json.dump(payload, f, ensure_ascii=False, indent=2)
     except (OSError, TypeError, ValueError) as e:
         raise LabelFileWriteError(f"failed to write {filename!r}: {e}") from e
-
-
-class LabelFile:
-    shapes: list[ShapeDict]
-    suffix: Final[str] = LABEL_FILE_SUFFIX
-
-    def __init__(self, filename: str | None = None) -> None:
-        self.shapes = []
-        self.image_path: str | None = None
-        self.image_data: bytes | None = None
-        self.other_data: dict[str, Any] = {}
-        self.flags: dict[str, bool] = {}
-        self.filename: str | None = filename
-        if filename is not None:
-            self.load(filename=filename)
-
-    @property
-    def imagePath(self) -> str | None:
-        warnings.warn(
-            "LabelFile.imagePath is deprecated and will be removed in a future "
-            "release; use image_path",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.image_path
-
-    @imagePath.setter
-    def imagePath(self, value: str | None) -> None:
-        warnings.warn(
-            "LabelFile.imagePath is deprecated and will be removed in a future "
-            "release; use image_path",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.image_path = value
-
-    @property
-    def imageData(self) -> bytes | None:
-        warnings.warn(
-            "LabelFile.imageData is deprecated and will be removed in a future "
-            "release; use image_data",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.image_data
-
-    @imageData.setter
-    def imageData(self, value: bytes | None) -> None:
-        warnings.warn(
-            "LabelFile.imageData is deprecated and will be removed in a future "
-            "release; use image_data",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.image_data = value
-
-    @property
-    def otherData(self) -> dict[str, Any]:
-        warnings.warn(
-            "LabelFile.otherData is deprecated and will be removed in a future "
-            "release; use other_data",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.other_data
-
-    @otherData.setter
-    def otherData(self, value: dict[str, Any]) -> None:
-        warnings.warn(
-            "LabelFile.otherData is deprecated and will be removed in a future "
-            "release; use other_data",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.other_data = value
-
-    @staticmethod
-    def load_image_file(filename: str) -> bytes:
-        return read_image_file(filename=filename)
-
-    def load(self, filename: str) -> None:
-        loaded: LabelData = read_label_file(filename=filename)
-        self.flags = loaded.flags
-        self.shapes = loaded.shapes
-        self.image_path = loaded.image_path
-        self.image_data = loaded.image_data
-        self.other_data = loaded.other_data
-        self.filename = filename
-
-    def save(
-        self,
-        filename: str,
-        shapes: list[dict[str, Any]],
-        image_path: str,
-        image_height: int | None,
-        image_width: int | None,
-        image_data: bytes | None = None,
-        other_data: dict[str, Any] | None = None,
-        flags: dict[str, bool] | None = None,
-    ) -> None:
-        write_label_file(
-            filename=filename,
-            shapes=shapes,
-            image_path=image_path,
-            image_height=image_height,
-            image_width=image_width,
-            image_data=image_data,
-            other_data=other_data,
-            flags=flags,
-        )
-        self.filename = filename
-
-    @staticmethod
-    def is_label_file(filename: str) -> bool:
-        return is_label_file_path(filename=filename)
 
 
 _DISPLAYABLE_MODES = {"1", "L", "P", "RGB", "RGBA", "LA", "PA"}
@@ -435,9 +326,13 @@ def _imread_tiff(filename: str) -> PIL.Image.Image:
 
 def _normalize_to_uint8(arr: NDArray) -> NDArray[np.uint8]:
     arr = arr.astype(np.float64)
-    min_val = np.nanmin(arr)
-    max_val = np.nanmax(arr)
-    if np.isnan(min_val) or np.isnan(max_val) or max_val - min_val == 0:
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return np.zeros(arr.shape, dtype=np.uint8)
+    min_val = finite.min()
+    max_val = finite.max()
+    if max_val - min_val == 0:
         return np.zeros(arr.shape, dtype=np.uint8)
     normalized = (arr - min_val) / (max_val - min_val) * 255
-    return np.clip(normalized, 0, 255).astype(np.uint8)
+    bounded = np.nan_to_num(np.clip(normalized, 0, 255), nan=0.0)
+    return bounded.astype(np.uint8)

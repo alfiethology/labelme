@@ -1,27 +1,27 @@
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Callable
 from collections.abc import Generator
 from pathlib import Path
 
 import pytest
-import yaml
-from PyQt5 import QtGui
-from PyQt5.QtCore import QPoint
-from PyQt5.QtCore import QPointF
-from PyQt5.QtCore import QSettings
-from PyQt5.QtCore import QSize
-from PyQt5.QtCore import Qt
-from PyQt5.QtCore import QTimer
-from PyQt5.QtWidgets import QApplication
+from PySide6 import QtGui
+from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPointF
+from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSize
+from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer
+from PySide6.QtWidgets import QApplication
 from pytestqt.qtbot import QtBot
 
-import labelme.app
+import labelme._app
 from labelme.__main__ import main
-from labelme.app import MainWindow
-from labelme.widgets.canvas import Canvas
-from labelme.widgets.label_dialog import LabelDialog
+from labelme._app import MainWindow
+from labelme._widgets.canvas import Canvas
+from labelme._widgets.label_dialog import LabelDialog
 
 
 @pytest.fixture(scope="session")
@@ -39,11 +39,20 @@ def _isolated_qtsettings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[None, None, None]:
     settings_file = tmp_path / "qtsettings.ini"
-    settings: QSettings = QSettings(str(settings_file), QSettings.IniFormat)
+    settings: QSettings = QSettings(str(settings_file), QSettings.Format.IniFormat)
     monkeypatch.setattr(
-        labelme.app.QtCore, "QSettings", lambda *args, **kwargs: settings
+        labelme._app.QtCore, "QSettings", lambda *args, **kwargs: settings
     )
     yield
+
+
+@pytest.fixture(autouse=True)
+def _stub_setup_loguru(monkeypatch: pytest.MonkeyPatch) -> None:
+    # main() configures loguru with a file handler using enqueue=True, which
+    # spawns a multiprocessing.Queue (semaphores → file descriptors). Calling
+    # main() per test leaks FDs faster than GC reclaims them and exhausts the
+    # worker's ulimit. Tests don't need file logging, so stub it out.
+    monkeypatch.setattr("labelme.__main__._setup_loguru", lambda logger_level: None)
 
 
 MainWinFactory = Callable[..., MainWindow]
@@ -93,7 +102,7 @@ def main_win(
                 if "labels" in config_overrides:
                     argv.extend(["--labels", ",".join(config_overrides["labels"])])
         elif config_overrides:
-            argv.extend(["--config", yaml.dump(config_overrides)])
+            argv.extend(["--config", json.dumps(config_overrides)])
 
         if output_dir is not None:
             argv.extend(["--output", str(output_dir)])
@@ -108,7 +117,7 @@ def main_win(
         assert isinstance(app, QApplication)
 
         monkeypatch.setattr("labelme.__main__.QtWidgets.QApplication", _QAppProxy(app))
-        monkeypatch.setattr(app, "exec_", lambda: 0)
+        monkeypatch.setattr(app, "exec", lambda: 0)
 
         existing = set(w for w in app.topLevelWidgets() if isinstance(w, MainWindow))
 
@@ -135,11 +144,22 @@ def main_win(
             pass
 
 
+def hover_widget_pos(qtbot: QtBot, canvas: Canvas, pos: QPoint) -> None:
+    # The offscreen Qt platform dedupes mouseMove events that match the
+    # current cursor position, which suppresses hover-state refresh after a
+    # click that landed on the same pixel. Nudging to (0, 0) first guarantees
+    # the second move is treated as fresh.
+    qtbot.mouseMove(canvas, pos=QPoint(0, 0))
+    qtbot.wait(50)
+    qtbot.mouseMove(canvas, pos=pos)
+    qtbot.wait(50)
+
+
 def click_canvas_fraction(
     qtbot: QtBot,
     canvas: Canvas,
     xy: tuple[float, float],
-    modifier: Qt.KeyboardModifier = Qt.NoModifier,
+    modifier: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
 ) -> None:
     # Fractions are interpreted in image-pixel space so callers stay valid
     # regardless of window/canvas size or letterboxing.
@@ -149,7 +169,7 @@ def click_canvas_fraction(
     pos = image_to_widget_pos(canvas=canvas, image_pos=image_pos)
     qtbot.mouseMove(canvas, pos=pos)
     qtbot.wait(50)
-    qtbot.mouseClick(canvas, Qt.LeftButton, modifier=modifier, pos=pos)
+    qtbot.mouseClick(canvas, Qt.MouseButton.LeftButton, modifier, pos=pos)
     qtbot.wait(50)
 
 
@@ -159,20 +179,23 @@ def drag_canvas(
     button: Qt.MouseButton,
     start: QPoint,
     end: QPoint,
+    modifier: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
 ) -> None:
-    qtbot.mousePress(canvas, button, pos=start)
+    qtbot.mousePress(canvas, button, modifier, pos=start)
     qtbot.wait(50)
     # qtbot.mouseMove does not carry button state, so send a raw event
+    global_pos = QPointF(canvas.mapToGlobal(end))
     move_event = QtGui.QMouseEvent(
-        QtGui.QMouseEvent.MouseMove,
+        QtGui.QMouseEvent.Type.MouseMove,
         QPointF(end),
-        Qt.NoButton,
+        global_pos,
+        Qt.MouseButton.NoButton,
         button,
-        Qt.NoModifier,
+        modifier,
     )
     QApplication.sendEvent(canvas, move_event)
     qtbot.wait(50)
-    qtbot.mouseRelease(canvas, button, pos=end)
+    qtbot.mouseRelease(canvas, button, modifier, pos=end)
     qtbot.wait(50)
 
 
@@ -198,7 +221,7 @@ def submit_label_dialog(
         label_dialog.edit.clear()
         qtbot.keyClicks(label_dialog.edit, label)
         qtbot.wait(50)
-        qtbot.keyClick(label_dialog.edit, Qt.Key_Enter)
+        qtbot.keyClick(label_dialog.edit, Qt.Key.Key_Enter)
 
     schedule_on_dialog(label_dialog=label_dialog, action=_action)
 
@@ -230,7 +253,7 @@ def draw_and_commit_polygon(
     # polygon and opens the dialog, then the queued poller fills it in.
     # Reversing the order deadlocks the test.
     submit_label_dialog(qtbot=qtbot, label_dialog=win._label_dialog, label=label)
-    qtbot.keyPress(canvas, Qt.Key_Return)
+    qtbot.keyPress(canvas, Qt.Key.Key_Return)
 
     def shape_committed() -> None:
         assert len(canvas.shapes) == num_before + 1
@@ -240,11 +263,12 @@ def draw_and_commit_polygon(
 
 
 def select_shape(qtbot: QtBot, canvas: Canvas, shape_index: int = 0) -> None:
-    shape_center = canvas.shapes[shape_index].bounds().center()
-    pos = image_to_widget_pos(canvas=canvas, image_pos=shape_center)
+    points = canvas.shapes[shape_index].points
+    centroid = QPointF(float(points[:, 0].mean()), float(points[:, 1].mean()))
+    pos = image_to_widget_pos(canvas=canvas, image_pos=centroid)
     qtbot.mouseMove(canvas, pos=pos)
     qtbot.wait(50)
-    qtbot.mouseClick(canvas, Qt.LeftButton, pos=pos)
+    qtbot.mouseClick(canvas, Qt.MouseButton.LeftButton, pos=pos)
     qtbot.wait(50)
     assert len(canvas.selected_shapes) == 1
 
@@ -253,8 +277,7 @@ def show_window_and_wait_for_imagedata(qtbot: QtBot, win: MainWindow) -> None:
     win.show()
 
     def check_image_data() -> None:
-        assert hasattr(win, "_image_data")
-        assert win._image_data is not None
+        assert win._annotation is not None
 
     qtbot.waitUntil(check_image_data)
 

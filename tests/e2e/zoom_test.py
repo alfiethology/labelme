@@ -4,10 +4,14 @@ from pathlib import Path
 from typing import Final
 
 import pytest
+from PySide6 import QtGui
+from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPointF
+from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
-from labelme.app import MainWindow
-from labelme.app import _ZoomMode
+from labelme._app import MainWindow
+from labelme._app import _ZoomMode
 
 from ..conftest import close_or_pause
 from .conftest import MainWinFactory
@@ -74,5 +78,103 @@ def test_zoom_to_original(
 
     assert _win._canvas_widgets.zoom_widget.value() == 100
     assert _win._zoom_mode == _ZoomMode.MANUAL_ZOOM
+
+    close_or_pause(qtbot=qtbot, widget=_win, pause=pause)
+
+
+@pytest.mark.gui
+def test_zoom_step_keeps_fractional_precision(
+    qtbot: QtBot,
+    _win: MainWindow,
+    pause: bool,
+) -> None:
+    _win._canvas_widgets.zoom_widget.setValue(105)
+    _win._add_zoom(increment=1.1)
+    # 105 * 1.1 = 115.5; the old integer widget clamped this up to 116.
+    assert _win._canvas_widgets.zoom_widget.value() == pytest.approx(115.5)
+
+    close_or_pause(qtbot=qtbot, widget=_win, pause=pause)
+
+
+def _make_wheel_event(
+    pos: QPointF,
+    angle_delta: QPoint,
+    modifiers: Qt.KeyboardModifier,
+) -> QtGui.QWheelEvent:
+    # PySide6's QWheelEvent constructor takes positional args;
+    # the 8-arg form matches the modern Qt6 signature.
+    return QtGui.QWheelEvent(
+        pos,
+        pos,
+        QPoint(0, 0),
+        angle_delta,
+        Qt.MouseButton.NoButton,
+        modifiers,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+
+
+@pytest.mark.gui
+@pytest.mark.parametrize(
+    ("modifiers", "angle_delta", "signal_attr", "expected_orientation"),
+    [
+        pytest.param(
+            Qt.KeyboardModifier.ControlModifier,
+            QPoint(0, 120),
+            "zoom_request",
+            None,
+            id="ctrl_zoom",
+        ),
+        pytest.param(
+            Qt.KeyboardModifier.NoModifier,
+            QPoint(0, 120),
+            "scroll_request",
+            Qt.Orientation.Vertical,
+            id="plain_scroll",
+        ),
+        pytest.param(
+            Qt.KeyboardModifier.ShiftModifier,
+            QPoint(0, 120),
+            "scroll_request",
+            Qt.Orientation.Horizontal,
+            id="shift_horizontal_scroll",
+        ),
+    ],
+)
+def test_canvas_wheel_event_dispatches_signal(
+    qtbot: QtBot,
+    _win: MainWindow,
+    pause: bool,
+    modifiers: Qt.KeyboardModifier,
+    angle_delta: QPoint,
+    signal_attr: str,
+    expected_orientation: Qt.Orientation | None,
+) -> None:
+    canvas = _win._canvas_widgets.canvas
+    captured: list[tuple[object, ...]] = []
+    signal = getattr(canvas, signal_attr)
+    signal.connect(lambda *args: captured.append(args))
+
+    canvas.wheelEvent(
+        _make_wheel_event(
+            pos=QPointF(canvas.width() / 2, canvas.height() / 2),
+            angle_delta=angle_delta,
+            modifiers=modifiers,
+        )
+    )
+
+    assert captured, f"{signal_attr} was not emitted"
+    if expected_orientation is not None:
+        # The plain-scroll branch emits an empty horizontal step (delta.x() == 0)
+        # before the real vertical one, so filter to non-zero deltas. There must
+        # be exactly one non-zero emission, on the expected axis, carrying the
+        # full angle_delta.y(). Anything looser would silently pass if the
+        # canvas dropped the real emission and only kept the zero step.
+        non_zero = [args for args in captured if args[0] != 0]
+        assert len(non_zero) == 1, (
+            f"{signal_attr} expected exactly one non-zero emission, got {non_zero!r}"
+        )
+        assert non_zero[0] == (angle_delta.y(), expected_orientation)
 
     close_or_pause(qtbot=qtbot, widget=_win, pause=pause)

@@ -4,13 +4,12 @@ from functools import partial
 from typing import Final
 
 import pytest
-from PyQt5.QtCore import QPointF
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QMessageBox
+from PySide6.QtCore import QPointF
+from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
-from labelme.app import MainWindow
-from labelme.widgets.label_dialog import LabelDialog
+from labelme._app import MainWindow
+from labelme._widgets.label_dialog import LabelDialog
 
 from ..conftest import close_or_pause
 from .conftest import draw_and_commit_polygon
@@ -50,7 +49,7 @@ def test_last_label_memo(
     _schedule_capture_then_cancel(label_dialog=label_dialog, captured=captured)
 
     _draw_triangle(qtbot=qtbot, win=raw_win)
-    qtbot.keyPress(canvas, Qt.Key_Return)
+    qtbot.keyPress(canvas, Qt.Key.Key_Return)
 
     qtbot.waitUntil(lambda: bool(captured), timeout=_SHAPE_TIMEOUT_MS)
 
@@ -72,13 +71,11 @@ def test_restore_last_shape_via_undo(
     raw_win._switch_canvas_mode(edit=True)
 
     assert len(canvas.shapes) == 1
-    original_points = [QPointF(p) for p in canvas.shapes[0].points]
+    original_points = [
+        QPointF(float(p[0]), float(p[1])) for p in canvas.shapes[0].points
+    ]
 
-    monkeypatch.setattr(
-        QMessageBox,
-        "warning",
-        lambda *args, **kwargs: QMessageBox.Yes,
-    )
+    monkeypatch.setattr(raw_win, "_confirm_deletion", lambda *args, **kwargs: True)
 
     select_shape(qtbot=qtbot, canvas=canvas, shape_index=0)
     raw_win.delete_selected_shapes()
@@ -89,6 +86,8 @@ def test_restore_last_shape_via_undo(
 
     restored = canvas.shapes[0]
     assert restored.label == "restore_me"
-    assert [QPointF(p) for p in restored.points] == original_points
+    assert [
+        QPointF(float(p[0]), float(p[1])) for p in restored.points
+    ] == original_points
 
     close_or_pause(qtbot=qtbot, widget=raw_win, pause=pause)

@@ -1,101 +1,63 @@
 from __future__ import annotations
 
 import pytest
-from PyQt5 import QtCore
-from PyQt5 import QtWidgets
 from pytestqt.qtbot import QtBot
 
-from labelme.widgets import LabelDialog
-from labelme.widgets import LabelQLineEdit
+from labelme._widgets.label_dialog import LabelDialog
 
 
-@pytest.mark.gui
-def test_LabelQLineEdit(qtbot: QtBot) -> None:
-    list_widget = QtWidgets.QListWidget()
-    list_widget.addItems(["cat", "dog", "person"])
-    widget = LabelQLineEdit()
-    widget.set_list_widget(list_widget)
-    qtbot.addWidget(widget)
-
-    # key press to navigate in label list
-    item = widget.list_widget.findItems("cat", QtCore.Qt.MatchExactly)[0]
-    widget.list_widget.setCurrentItem(item)
-    current_item = widget.list_widget.currentItem()
-    assert current_item is not None
-    assert current_item.text() == "cat"
-    qtbot.keyPress(widget, QtCore.Qt.Key_Down)
-    current_item = widget.list_widget.currentItem()
-    assert current_item is not None
-    assert current_item.text() == "dog"
-
-    # key press to enter label
-    qtbot.keyPress(widget, QtCore.Qt.Key_P)
-    qtbot.keyPress(widget, QtCore.Qt.Key_E)
-    qtbot.keyPress(widget, QtCore.Qt.Key_R)
-    qtbot.keyPress(widget, QtCore.Qt.Key_S)
-    qtbot.keyPress(widget, QtCore.Qt.Key_O)
-    qtbot.keyPress(widget, QtCore.Qt.Key_N)
-    assert widget.text() == "person"
+def _labels(dialog: LabelDialog) -> set[str]:
+    label_list = dialog.label_list
+    return {label_list.item(i).text() for i in range(label_list.count())}
 
 
-@pytest.mark.gui
-def test_LabelDialog_add_label_history(qtbot: QtBot) -> None:
-    labels = ["cat", "dog", "person"]
-    widget = LabelDialog(labels=labels, sort_labels=True)
-    qtbot.addWidget(widget)
-
-    widget.add_label_history("bicycle")
-    assert widget.label_list.count() == 4
-    widget.add_label_history("bicycle")
-    assert widget.label_list.count() == 4
-    item: QtWidgets.QListWidgetItem | None = widget.label_list.item(0)
-    assert item
-    assert item.text() == "bicycle"
+@pytest.fixture
+def dialog(qtbot: QtBot) -> LabelDialog:
+    label_dialog = LabelDialog(labels=["cat", "dog"])
+    qtbot.addWidget(label_dialog)
+    return label_dialog
 
 
-@pytest.mark.gui
-def test_LabelDialog_popup(qtbot: QtBot) -> None:
-    labels = ["cat", "dog", "person"]
-    widget = LabelDialog(labels=labels, sort_labels=True)
-    qtbot.addWidget(widget)
+def test_set_predefined_labels_adds_new_label(dialog: LabelDialog) -> None:
+    dialog.set_predefined_labels(["cat", "dog", "bird"])
+    assert _labels(dialog) == {"cat", "dog", "bird"}
 
-    # popup(text='cat')
 
-    def interact() -> None:
-        qtbot.keyClick(widget.edit, QtCore.Qt.Key_P)  # enter 'p' for 'person'  # NOQA
-        qtbot.keyClick(widget.edit, QtCore.Qt.Key_Enter)  # NOQA
-        qtbot.keyClick(widget.edit, QtCore.Qt.Key_Enter)  # NOQA
+def test_set_predefined_labels_removes_unused_label(dialog: LabelDialog) -> None:
+    dialog.set_predefined_labels(["cat"])
+    assert _labels(dialog) == {"cat"}
 
-    QtCore.QTimer.singleShot(500, interact)
-    label, flags, group_id, description = widget.popup("cat")
-    assert label == "person"
-    assert flags == {}
-    assert group_id is None
-    assert description == ""
 
-    # popup()
+def test_set_predefined_labels_preserves_session_history(dialog: LabelDialog) -> None:
+    dialog.add_label_history("ad-hoc")
+    dialog.set_predefined_labels(["cat", "dog", "bird"])
+    assert _labels(dialog) == {"cat", "dog", "bird", "ad-hoc"}
 
-    def interact() -> None:
-        qtbot.keyClick(widget.edit, QtCore.Qt.Key_Enter)  # NOQA
-        qtbot.keyClick(widget.edit, QtCore.Qt.Key_Enter)  # NOQA
 
-    QtCore.QTimer.singleShot(500, interact)
-    label, flags, group_id, description = widget.popup()
-    assert label == "person"
-    assert flags == {}
-    assert group_id is None
-    assert description == ""
+def test_removed_predefined_label_kept_when_used_this_session(
+    dialog: LabelDialog,
+) -> None:
+    dialog.add_label_history("dog")
+    dialog.set_predefined_labels(["cat"])
+    assert _labels(dialog) == {"cat", "dog"}
 
-    # popup() + key_Up
 
-    def interact() -> None:
-        qtbot.keyClick(widget.edit, QtCore.Qt.Key_Up)  # 'person' -> 'dog'  # NOQA
-        qtbot.keyClick(widget.edit, QtCore.Qt.Key_Enter)  # NOQA
-        qtbot.keyClick(widget.edit, QtCore.Qt.Key_Enter)  # NOQA
+def test_completer_model_stays_bound_after_update(dialog: LabelDialog) -> None:
+    dialog.set_predefined_labels(["cat", "dog", "bird"])
+    assert dialog.edit.completer().model() is dialog.label_list.model()
 
-    QtCore.QTimer.singleShot(500, interact)
-    label, flags, group_id, description = widget.popup()
-    assert label == "dog"
-    assert flags == {}
-    assert group_id is None
-    assert description == ""
+
+def test_set_predefined_labels_with_selected_item_does_not_raise(
+    dialog: LabelDialog,
+) -> None:
+    dialog.label_list.setCurrentRow(0)
+    dialog.set_predefined_labels(["cat", "dog", "bird"])
+    assert _labels(dialog) == {"cat", "dog", "bird"}
+
+
+def test_set_predefined_labels_empty_keeps_only_session_history(
+    dialog: LabelDialog,
+) -> None:
+    dialog.add_label_history("ad-hoc")
+    dialog.set_predefined_labels([])
+    assert _labels(dialog) == {"ad-hoc"}

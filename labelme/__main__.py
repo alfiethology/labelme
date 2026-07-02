@@ -11,16 +11,19 @@ import warnings
 from pathlib import Path
 from typing import AnyStr
 
-import yaml
 from loguru import logger
-from PyQt5 import QtCore
-from PyQt5 import QtWidgets
+from PySide6 import QtCore
+from PySide6 import QtWidgets
 
 from labelme import __appname__
 from labelme import __version__
-from labelme.app import MainWindow
-from labelme.config import get_user_config_file
-from labelme.utils import new_icon
+
+from . import _config
+from . import _locale
+from . import _yaml
+from ._app import MainWindow
+from ._utils import apply_color_theme
+from ._utils import new_icon
 
 
 class _LoggerIO(io.StringIO):
@@ -48,10 +51,7 @@ class _LoggerIO(io.StringIO):
 
 
 def _setup_loguru(logger_level: str) -> None:
-    try:
-        logger.remove(handler_id=0)
-    except ValueError:
-        pass
+    logger.remove()
 
     if sys.stderr:
         logger.add(sys.stderr, level=logger_level)
@@ -103,10 +103,39 @@ def _handle_exception(
     sys.exit(1)
 
 
+class _DeprecatedAlias(argparse.Action):
+    """Store the value, but FutureWarning when a deprecated alias spelling is used.
+
+    The canonical option string is the first one registered; any other spelling
+    argparse matched (including abbreviations) warns and points back to it.
+    """
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: object,
+        option_string: str | None = None,
+    ) -> None:
+        canonical = self.option_strings[0]
+        if option_string is not None and option_string != canonical:
+            warnings.warn(
+                f"{option_string} is deprecated and will be removed in a future "
+                f"version. Use {canonical} instead.",
+                FutureWarning,
+                stacklevel=1,
+            )
+        setattr(namespace, self.dest, self.const if self.nargs == 0 else values)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", "-V", action="store_true", help="show version")
-    parser.add_argument("--reset-config", action="store_true", help="reset qt config")
+    parser.add_argument(
+        "--reset-config",
+        action="store_true",
+        help="reset window geometry and dock layout",
+    )
     parser.add_argument(
         "--logger-level",
         default="debug",
@@ -118,7 +147,7 @@ def main() -> None:
         "--output",
         help="output directory for saving annotation JSON files",
     )
-    default_config_file = get_user_config_file()
+    default_config_file = _config.get_user_config_file()
     parser.add_argument(
         "--config",
         dest="config",
@@ -126,13 +155,6 @@ def main() -> None:
         default=default_config_file,
     )
     # config for the gui
-    parser.add_argument(
-        "--nodata",
-        dest="_deprecated_nodata",
-        action="store_true",
-        help=argparse.SUPPRESS,
-        default=argparse.SUPPRESS,
-    )
     parser.add_argument(
         "--with-image-data",
         dest="with_image_data",
@@ -148,17 +170,12 @@ def main() -> None:
         default=argparse.SUPPRESS,
     )
     parser.add_argument(
-        "--autosave",
-        dest="_deprecated_autosave",
-        action="store_true",
-        help=argparse.SUPPRESS,
-        default=argparse.SUPPRESS,
-    )
-    parser.add_argument(
         "--no-sort-labels",
         "--nosortlabels",  # deprecated
         dest="sort_labels",
-        action="store_false",
+        action=_DeprecatedAlias,
+        nargs=0,
+        const=False,
         help="stop sorting labels",
         default=argparse.SUPPRESS,
     )
@@ -171,6 +188,7 @@ def main() -> None:
         "--label-flags",
         "--labelflags",  # deprecated
         dest="label_flags",
+        action=_DeprecatedAlias,
         help=r"yaml string of label specific flags OR file containing json "
         r"string of label specific flags (ex. {person-\d+: [male, tall], "
         r"dog-\d+: [black, brown, white], .*: [occluded]})",  # NOQA
@@ -185,6 +203,7 @@ def main() -> None:
         "--validate-label",
         "--validatelabel",  # deprecated
         dest="validate_label",
+        action=_DeprecatedAlias,
         choices=["exact"],
         help="label validation types",
         default=argparse.SUPPRESS,
@@ -202,25 +221,6 @@ def main() -> None:
         default=argparse.SUPPRESS,
     )
     args = parser.parse_args()
-
-    if hasattr(args, "_deprecated_nodata"):
-        warnings.warn(
-            "--nodata is deprecated and will be removed in a future version. "
-            "Image data is no longer stored by default. "
-            "Use --with-image-data to store it.",
-            FutureWarning,
-            stacklevel=1,
-        )
-        del args._deprecated_nodata
-
-    if hasattr(args, "_deprecated_autosave"):
-        warnings.warn(
-            "--autosave is deprecated and will be removed in a future version. "
-            "Auto save is now enabled by default. Use --no-autosave to disable it.",
-            FutureWarning,
-            stacklevel=1,
-        )
-        del args._deprecated_autosave
 
     if args.version:
         print(f"{__appname__} {__version__}")
@@ -248,20 +248,23 @@ def main() -> None:
     if hasattr(args, "label_flags"):
         if Path(args.label_flags).is_file():
             with open(args.label_flags, encoding="utf-8") as f:
-                args.label_flags = yaml.safe_load(f)
+                args.label_flags = _yaml.safe_load(f)
         else:
-            args.label_flags = yaml.safe_load(args.label_flags)
+            args.label_flags = _yaml.safe_load(args.label_flags)
 
     config_from_args = args.__dict__
     config_from_args.pop("version")
     reset_config = config_from_args.pop("reset_config")
     file_or_dir = config_from_args.pop("path")
     output = config_from_args.pop("output")
+    # logger_level configures loguru, not user config; excluding it keeps the
+    # Settings dialog enabled (any override disables it).
+    config_from_args.pop("logger_level")
 
     config_overrides: dict
     config_file: Path | None
     config_str: str = config_from_args.pop("config")
-    if isinstance(config_loaded := yaml.safe_load(config_str), dict):
+    if isinstance(config_loaded := _yaml.safe_load(config_str), dict):
         config_overrides = config_loaded
         config_file = None
     else:
@@ -284,15 +287,32 @@ def main() -> None:
             )
         output_dir = output
 
+    # Read the language and color theme before QApplication exists so the
+    # translator and palette are set before any widget is built. MainWindow
+    # re-reads the same config; both reads are pure (load_config never writes), so
+    # the duplicate parse is harmless.
+    try:
+        loaded_config = _config.load_config(
+            config_file=config_file, config_overrides=config_overrides
+        )
+        language = loaded_config.get("language")
+        color_theme = loaded_config.get("color_theme", "system")
+    except Exception as e:
+        logger.debug("Could not read config: {}", e)
+        language = None
+        color_theme = "system"
+    # A stale or hand-edited language code with no bundled translation follows the
+    # system locale, matching the Settings dialog.
+    if not _locale.is_valid_language(language):
+        language = None
     translator = QtCore.QTranslator()
     translator.load(
-        QtCore.QLocale.system().name(),
-        str(Path(__file__).resolve().parent / "translate"),
+        language or QtCore.QLocale.system().name(),
+        str(_locale.TRANSLATE_DIR),
     )
     app = QtWidgets.QApplication(sys.argv)
     app.setStyle("Fusion")  # for consistent appearance across platforms
-    # Force light mode to avoid dark mode UI issues (e.g., invisible icons)
-    app.setPalette(QtWidgets.QStyleFactory.create("Fusion").standardPalette())
+    apply_color_theme(theme=color_theme)
     app.setApplicationName(__appname__)
     app.setWindowIcon(new_icon("icon"))
     app.installTranslator(translator)
@@ -304,14 +324,14 @@ def main() -> None:
     )
 
     if reset_config:
-        logger.info(f"Resetting Qt config: {win.settings.fileName()}")
-        win.settings.clear()
+        logger.info(f"Resetting window state: {win._window_state.fileName()}")
+        win._window_state.clear()
         sys.exit(0)
 
     with contextlib.redirect_stderr(new_target=_LoggerIO()):
         win.show()
         win.raise_()
-        sys.exit(app.exec_())
+        sys.exit(app.exec())
 
 
 # this main block is required to generate executable by pyinstaller

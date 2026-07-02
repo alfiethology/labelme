@@ -4,10 +4,10 @@ from pathlib import Path
 from typing import Final
 
 import pytest
-from PyQt5.QtCore import QTimer
+from PySide6.QtCore import QTimer
 from pytestqt.qtbot import QtBot
 
-from labelme.app import MainWindow
+from labelme._app import MainWindow
 
 from ..conftest import close_or_pause
 from .conftest import MainWinFactory

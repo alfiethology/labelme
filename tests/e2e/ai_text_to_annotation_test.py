@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock
 
+import numpy as np
 import osam.types
 import pytest
 from pytestqt.qtbot import QtBot
@@ -15,7 +17,7 @@ from .conftest import MainWinFactory
 from .conftest import show_window_and_wait_for_imagedata
 
 if TYPE_CHECKING:
-    from labelme.app import MainWindow
+    from labelme._app import MainWindow
 
 _AI_TEXT_MODEL = "yoloworld:latest"
 
@@ -25,11 +27,15 @@ def _make_response(
     boxes: list[tuple[int, int, int, int]],
     scores: list[float],
     label_indices: list[int],
+    with_masks: bool = False,
 ) -> osam.types.GenerateResponse:
     annotations = []
     for (xmin, ymin, xmax, ymax), score, label_idx in zip(
         boxes, scores, label_indices, strict=True
     ):
+        mask = None
+        if with_masks:
+            mask = np.ones((ymax - ymin + 1, xmax - xmin + 1), dtype=bool)
         annotations.append(
             osam.types.Annotation(
                 bounding_box=osam.types.BoundingBox(
@@ -37,18 +43,22 @@ def _make_response(
                 ),
                 text=texts[label_idx],
                 score=score,
+                mask=mask,
             )
         )
     return osam.types.GenerateResponse(model=_AI_TEXT_MODEL, annotations=annotations)
 
 
-def _make_person_response(texts: list[str]) -> osam.types.GenerateResponse:
+def _make_person_response(
+    texts: list[str], with_masks: bool = False
+) -> osam.types.GenerateResponse:
     person_idx = texts.index("person")
     return _make_response(
         texts=texts,
         boxes=[(50, 30, 200, 300), (220, 40, 350, 290)],
         scores=[0.85, 0.45],
         label_indices=[person_idx, person_idx],
+        with_masks=with_masks,
     )
 
 
@@ -124,7 +134,7 @@ def _run_text_prompt(
             "polygon",
             "polygon",
             "person",
-            _make_person_response,
+            functools.partial(_make_person_response, with_masks=True),
             {"person"},
             id="polygon",
         ),
@@ -132,7 +142,7 @@ def _run_text_prompt(
             "ai_box_to_shape",
             "polygon",
             "person",
-            _make_person_response,
+            functools.partial(_make_person_response, with_masks=True),
             {"person"},
             id="ai_box-polygon",
         ),
@@ -276,5 +286,54 @@ def test_score_threshold_filters_detections(
     )
     high_threshold_count = len(canvas.shapes)
     assert high_threshold_count == 1
+
+    close_or_pause(qtbot=qtbot, widget=win, pause=pause)
+
+
+@pytest.mark.gui
+def test_text_prompt_inference_error_surfaces_without_crashing(
+    main_win: MainWinFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    qtbot: QtBot,
+    data_path: Path,
+    pause: bool,
+) -> None:
+    # A model error during text-to-annotation inference must not crash the app:
+    # it surfaces as a non-fatal status message and the window stays alive.
+    win = main_win(file_or_dir=str(data_path / "raw/2011_000003.jpg"))
+    show_window_and_wait_for_imagedata(qtbot=qtbot, win=win)
+    canvas = win._canvas_widgets.canvas
+
+    def _raise(**_: object) -> osam.types.GenerateResponse:
+        raise RuntimeError("boom")
+
+    _install_mock_session(win=win, monkeypatch=monkeypatch, response_fn=_raise)
+    _run_text_prompt(win=win, qtbot=qtbot, text="person", create_mode="rectangle")
+
+    assert win.isVisible()
+    assert canvas.shapes == []
+    assert "AI inference failed" in win.statusBar().currentMessage()
+
+    close_or_pause(qtbot=qtbot, widget=win, pause=pause)
+
+
+@pytest.mark.gui
+def test_canvas_inference_failed_signal_surfaces_status_message(
+    main_win: MainWinFactory,
+    qtbot: QtBot,
+    data_path: Path,
+    pause: bool,
+) -> None:
+    # The hover-preview path emits inference_failed from inside paintEvent, so
+    # the signal is wired with a queued connection. Emitting it must still
+    # surface the status message once the event loop runs.
+    win = main_win(file_or_dir=str(data_path / "raw/2011_000003.jpg"))
+    show_window_and_wait_for_imagedata(qtbot=qtbot, win=win)
+
+    win._canvas_widgets.canvas.inference_failed.emit("RuntimeError: boom")
+    qtbot.waitUntil(
+        lambda: "AI inference failed" in win.statusBar().currentMessage(),
+        timeout=1000,
+    )
 
     close_or_pause(qtbot=qtbot, widget=win, pause=pause)
