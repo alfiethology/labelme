@@ -877,6 +877,12 @@ class MainWindow(QtWidgets.QMainWindow):
             enabled=settings_editable,
         )
         open_config.setMenuRole(QtGui.QAction.MenuRole.PreferencesRole)
+        default_label_color = action(
+            text=self.tr("Default Label Color…"),
+            slot=self._change_default_label_color,
+            icon=None,
+            tip=self.tr("Change the default color for drawing and labels"),
+        )
         help_ = action(
             self.tr("&Tutorial"),
             self.tutorial,
@@ -931,6 +937,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._actions.fill_drawing,
                 self._actions.fill_editing,
                 self._actions.show_center_dots,
+                default_label_color,
                 None,
                 self._actions.hide_all,
                 self._actions.show_all,
@@ -1205,16 +1212,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         canvas.set_point_size(self._config["shape"]["point_size"])
         canvas.set_show_labels(self._config["shape"]["show_labels"])
-        canvas.set_draft_palette(
-            Palette(
-                line=QtGui.QColor(*self._config["shape"]["line_color"]),
-                fill=QtGui.QColor(*self._config["shape"]["fill_color"]),
-                select_line=QtGui.QColor(*self._config["shape"]["select_line_color"]),
-                select_fill=QtGui.QColor(*self._config["shape"]["select_fill_color"]),
-                vertex_fill=QtGui.QColor(*self._config["shape"]["vertex_fill_color"]),
-                hvertex_fill=QtGui.QColor(*self._config["shape"]["hvertex_fill_color"]),
-            )
-        )
+        canvas.set_draft_palette(self._draft_palette_from_config())
         canvas.set_color_resolver(
             lambda label: self._get_rgb_by_label(
                 label=label, unique_label_list=self._docks.unique_label_list
@@ -1708,6 +1706,74 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._refresh_class_color(label=label)
 
+    def _draft_palette_from_config(self) -> Palette:
+        return Palette(
+            line=QtGui.QColor(*self._config["shape"]["line_color"]),
+            fill=QtGui.QColor(*self._config["shape"]["fill_color"]),
+            select_line=QtGui.QColor(*self._config["shape"]["select_line_color"]),
+            select_fill=QtGui.QColor(*self._config["shape"]["select_fill_color"]),
+            vertex_fill=QtGui.QColor(*self._config["shape"]["vertex_fill_color"]),
+            hvertex_fill=QtGui.QColor(*self._config["shape"]["hvertex_fill_color"]),
+        )
+
+    def _change_default_label_color(self) -> None:
+        current_rgb = self._config["default_shape_color"]
+        if current_rgb is None:
+            current_rgb = self._config["shape"]["line_color"][:3]
+        color = QtWidgets.QColorDialog.getColor(
+            QtGui.QColor(*current_rgb),
+            self,
+            self.tr("Choose Default Label Color"),
+        )
+        if not color.isValid():
+            return
+
+        rgb = [color.red(), color.green(), color.blue()]
+        line_color = [*rgb, *self._config["shape"]["line_color"][3:]]
+        vertex_fill_color = [
+            *rgb,
+            *self._config["shape"]["vertex_fill_color"][3:],
+        ]
+        select_line_color = [
+            *rgb,
+            *self._config["shape"]["select_line_color"][3:],
+        ]
+        select_fill_color = [
+            *rgb,
+            *self._config["shape"]["select_fill_color"][3:],
+        ]
+        values = (
+            (("default_shape_color",), rgb),
+            (("shape", "line_color"), line_color),
+            (("shape", "vertex_fill_color"), vertex_fill_color),
+            (("shape", "select_line_color"), select_line_color),
+            (("shape", "select_fill_color"), select_fill_color),
+        )
+        if self._is_settings_editable:
+            assert self._config_file is not None
+            try:
+                _config.set_overrides(config_file=self._config_file, values=values)
+            except (OSError, ValueError) as e:
+                QtWidgets.QMessageBox.warning(
+                    self, self.tr("Configuration Error"), str(e)
+                )
+                return
+
+        self._config["default_shape_color"] = rgb
+        self._config["shape"]["line_color"] = line_color
+        self._config["shape"]["vertex_fill_color"] = vertex_fill_color
+        self._config["shape"]["select_line_color"] = select_line_color
+        self._config["shape"]["select_fill_color"] = select_fill_color
+        canvas = self._canvas_widgets.canvas
+        canvas.set_draft_palette(self._draft_palette_from_config())
+
+        for index in range(self._docks.unique_label_list.count()):
+            item = self._docks.unique_label_list.item(index)
+            label = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(label, str):
+                self._refresh_class_color(label=label)
+        canvas.update()
+
     def validate_label(self, label: str) -> bool:
         policy = self._config["validate_label"]
         if policy is None:
@@ -1918,8 +1984,9 @@ class MainWindow(QtWidgets.QMainWindow):
             if rgb is not None:
                 return rgb
         if self._config["default_shape_color"]:
-            return self._config["default_shape_color"]
-        return (0, 255, 0)
+            rgb = self._config["default_shape_color"]
+            return (rgb[0], rgb[1], rgb[2])
+        return (255, 255, 0)
 
     def _refresh_class_color(self, *, label: str) -> None:
         rgb = self._get_rgb_by_label(

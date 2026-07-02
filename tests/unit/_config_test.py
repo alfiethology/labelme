@@ -7,6 +7,17 @@ import pytest
 from labelme import _config
 
 
+def test_default_label_color_is_yellow() -> None:
+    config = _config.load_config(config_file=None, config_overrides={})
+
+    assert config["default_shape_color"] == [255, 255, 0]
+    assert config["shape_color"] is None
+    assert config["shape"]["line_color"] == [255, 255, 0, 128]
+    assert config["shape"]["vertex_fill_color"] == [255, 255, 0, 255]
+    assert config["shape"]["select_line_color"] == [255, 255, 0, 255]
+    assert config["shape"]["select_fill_color"] == [255, 255, 0, 64]
+
+
 def test_get_user_config_file_creates_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -38,7 +38,7 @@ from ._shape_render import is_hit_by_point
 from ._shape_render import render_shape
 from .download import download_ai_model
 
-_DEFAULT_SHAPE_RGB: Final[tuple[int, int, int]] = (0, 255, 0)
+_DEFAULT_SHAPE_RGB: Final[tuple[int, int, int]] = (255, 255, 0)
 _DEFAULT_PALETTE: Final[Palette] = Palette.from_rgb(rgb=_DEFAULT_SHAPE_RGB)
 
 

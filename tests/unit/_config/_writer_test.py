@@ -111,6 +111,31 @@ def test_writes_list_in_flow_style(tmp_path: Path) -> None:
     assert "default_shape_color: [255, 0, 0]" in config_file.read_text(encoding="utf-8")
 
 
+def test_writes_multiple_overrides_atomically(tmp_path: Path) -> None:
+    config_file = tmp_path / ".labelmerc"
+
+    _config.set_overrides(
+        config_file=config_file,
+        values=(
+            (("default_shape_color",), [255, 0, 0]),
+            (("shape", "line_color"), [255, 0, 0, 128]),
+            (("shape", "vertex_fill_color"), [255, 0, 0, 255]),
+            (("shape", "select_line_color"), [255, 0, 0, 255]),
+            (("shape", "select_fill_color"), [255, 0, 0, 64]),
+        ),
+    )
+
+    assert _parse(config_file) == {
+        "default_shape_color": [255, 0, 0],
+        "shape": {
+            "line_color": [255, 0, 0, 128],
+            "vertex_fill_color": [255, 0, 0, 255],
+            "select_line_color": [255, 0, 0, 255],
+            "select_fill_color": [255, 0, 0, 64],
+        },
+    }
+
+
 def test_label_named_like_a_boolean_survives_round_trip(tmp_path: Path) -> None:
     config_file = tmp_path / ".labelmerc"
 
