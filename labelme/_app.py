@@ -1057,6 +1057,12 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         self.show_status_message(self.tr("Running custom YOLO detector…"), 0)
+        logger.info(
+            "Running Custom YOLO: model={!r}, confidence={:.2f}, image={!r}",
+            str(model_path),
+            self._custom_yolo.confidence,
+            self._image_path,
+        )
         QtWidgets.QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         QtWidgets.QApplication.processEvents()
         try:
@@ -1076,15 +1082,44 @@ class MainWindow(QtWidgets.QMainWindow):
                 conf=self._custom_yolo.confidence,
                 verbose=False,
             )
-            if not results or results[0].boxes is None:
-                self.show_status_message(self.tr("Custom YOLO found no objects."), 5000)
+            if not results:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    self.tr("Custom YOLO"),
+                    self.tr("The model returned no prediction result."),
+                )
                 return
             result = results[0]
-            boxes = result.boxes
-            xyxy = boxes.xyxy.detach().cpu().numpy()
-            confidences = boxes.conf.detach().cpu().numpy()
-            class_ids = boxes.cls.detach().cpu().numpy().astype(int)
+            predictions = result.boxes
+            prediction_kind = "boxes"
+            prediction_shape_type: ShapeType = "rectangle"
+            if predictions is None and result.obb is not None:
+                predictions = result.obb
+                prediction_kind = "oriented boxes"
+                prediction_shape_type = "oriented_rectangle"
+            if predictions is None:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    self.tr("Custom YOLO"),
+                    self.tr(
+                        "The selected model returned no boxes.\n\nActive model:\n{}"
+                    ).format(model_path),
+                )
+                return
+            if prediction_shape_type == "oriented_rectangle":
+                prediction_points = predictions.xyxyxyxy.detach().cpu().numpy()
+            else:
+                xyxy = predictions.xyxy.detach().cpu().numpy()
+                prediction_points = np.stack((xyxy[:, :2], xyxy[:, 2:]), axis=1)
+            confidences = predictions.conf.detach().cpu().numpy()
+            class_ids = predictions.cls.detach().cpu().numpy().astype(int)
             names = result.names
+            logger.info(
+                "Custom YOLO returned {} {} from {!r}",
+                len(prediction_points),
+                prediction_kind,
+                str(model_path),
+            )
         except Exception as error:
             logger.opt(exception=error).error("Custom YOLO inference failed")
             QtWidgets.QMessageBox.critical(
@@ -1099,10 +1134,8 @@ class MainWindow(QtWidgets.QMainWindow):
         shapes = [
             Shape(
                 label=str(names[int(class_id)]),
-                shape_type="rectangle",
-                points=np.asarray(
-                    [[box[0], box[1]], [box[2], box[3]]], dtype=np.float64
-                ),
+                shape_type=prediction_shape_type,
+                points=np.asarray(points, dtype=np.float64),
                 flags={},
                 description=json.dumps(
                     {
@@ -1112,8 +1145,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 ),
                 closed=True,
             )
-            for box, confidence, class_id in zip(
-                xyxy, confidences, class_ids, strict=True
+            for points, confidence, class_id in zip(
+                prediction_points, confidences, class_ids, strict=True
             )
         ]
         if not shapes:

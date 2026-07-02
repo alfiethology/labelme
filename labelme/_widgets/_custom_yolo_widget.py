@@ -51,6 +51,11 @@ class CustomYoloWidget(QtWidgets.QWidget):
         path_layout.addWidget(browse)
         layout.addLayout(path_layout)
 
+        self._active_model_label = QtWidgets.QLabel()
+        self._active_model_label.setToolTip(stored_path)
+        self._update_active_model_label(stored_path)
+        layout.addWidget(self._active_model_label)
+
         options = QtWidgets.QHBoxLayout()
         options.addWidget(QtWidgets.QLabel(self.tr("Confidence")))
         self._confidence = QtWidgets.QDoubleSpinBox()
@@ -85,6 +90,13 @@ class CustomYoloWidget(QtWidgets.QWidget):
     def _on_path_changed(self, path: str) -> None:
         self._settings.setValue("customYolo/modelPath", path)
         self._path_edit.setToolTip(path)
+        self._active_model_label.setToolTip(path)
+        self._update_active_model_label(path)
+
+    def _update_active_model_label(self, path: str) -> None:
+        model_path = Path(path)
+        model_name = "/".join(model_path.parts[-4:]) if path else self.tr("none")
+        self._active_model_label.setText(self.tr("Active model: {}").format(model_name))
 
     def _browse(self) -> None:
         start = str(self.model_path.parent) if self.model_path.name else ""
