@@ -1076,6 +1076,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 conf=self._custom_yolo.confidence,
                 verbose=False,
             )
+            if not results or results[0].boxes is None:
+                self.show_status_message(self.tr("Custom YOLO found no objects."), 5000)
+                return
             result = results[0]
             boxes = result.boxes
             xyxy = boxes.xyxy.detach().cpu().numpy()
