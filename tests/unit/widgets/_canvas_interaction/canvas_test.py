@@ -278,6 +278,33 @@ def test_cursor_is_pointing_hand_when_hovering_edge_in_edit_mode(
     _clear_cursor_override(canvas=canvas)
 
 
+@pytest.mark.gui
+def test_plain_left_click_on_polygon_edge_inserts_vertex(canvas: Canvas) -> None:
+    shape = Shape(
+        shape_type="polygon",
+        points=np.array([(10, 10), (90, 10), (90, 40), (10, 40)], dtype=np.float64),
+        closed=True,
+    )
+    canvas.load_shapes(shapes=[shape])
+    canvas.set_editing(value=True)
+    canvas.scale = 1.0
+    original_points = shape.points.copy()
+    pos = _image_to_widget(canvas=canvas, img_x=50, img_y=10)
+
+    canvas.mouseMoveEvent(_make_move_event(pos=pos))
+    canvas.mousePressEvent(_make_press_event(pos=pos, button=Qt.MouseButton.LeftButton))
+    canvas.mouseReleaseEvent(
+        _make_release_event(pos=pos, button=Qt.MouseButton.LeftButton)
+    )
+
+    np.testing.assert_array_equal(shape.points[0], [10, 10])
+    np.testing.assert_array_equal(shape.points[1], [50, 10])
+    np.testing.assert_array_equal(shape.points[2:], original_points[1:])
+    assert len(shape.points) == len(original_points) + 1
+    assert canvas.hovered_shape is shape
+    assert canvas._hovered_vertex == 1
+
+
 # ---------------------------------------------------------------------------
 # Cursor shape -- create mode, polygon-origin snap
 # ---------------------------------------------------------------------------
