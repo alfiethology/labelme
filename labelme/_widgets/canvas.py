@@ -909,7 +909,10 @@ class Canvas(QtWidgets.QWidget):
                 hovered_rotation=None,
             )
             self._apply_cursor(CursorRole.HANDLE)
-            status_messages.append(self.tr("ALT + Click to create point on shape"))
+            if target.shape.shape_type == "polygon":
+                status_messages.append(self.tr("Click to create point on shape"))
+            else:
+                status_messages.append(self.tr("ALT + Click to create point on shape"))
             self.update()
             return
 
@@ -933,9 +936,11 @@ class Canvas(QtWidgets.QWidget):
         typing.assert_never(target.kind)
 
     def add_point_to_edge(self) -> None:
+        self._add_point_to_edge(point=self._prev_move_point)
+
+    def _add_point_to_edge(self, point: QPointF | None) -> None:
         shape = self._last_hovered_shape
         index = self._last_hovered_edge
-        point = self._prev_move_point
         if shape is None or index is None or point is None:
             return
         shape.insert_point(index, (point.x(), point.y()))
@@ -1126,7 +1131,7 @@ class Canvas(QtWidgets.QWidget):
 
     def _press_left_while_editing(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
         modifiers = event.modifiers()
-        if self._maybe_modify_polygon_topology(modifiers=modifiers):
+        if self._maybe_modify_polygon_topology(pos=pos, modifiers=modifiers):
             # remove_selected_point already repainted; just consume the press.
             return
         if self._is_rotation_point_selected():
@@ -1138,12 +1143,21 @@ class Canvas(QtWidgets.QWidget):
         self._prev_point = pos
         self.update()
 
-    def _maybe_modify_polygon_topology(self, modifiers: Qt.KeyboardModifier) -> bool:
+    def _maybe_modify_polygon_topology(
+        self, pos: QPointF, modifiers: Qt.KeyboardModifier
+    ) -> bool:
         # Returns True only when the press is consumed as a terminal edit (a point
         # removal), so the caller skips point selection and starts no drag. Adding
         # a point intentionally falls through so the new vertex can be dragged.
-        if self._is_edge_selected() and modifiers == Qt.KeyboardModifier.AltModifier:
-            self.add_point_to_edge()
+        inserts_polygon_vertex = (
+            modifiers == Qt.KeyboardModifier.NoModifier
+            and self._last_hovered_shape is not None
+            and self._last_hovered_shape.shape_type == "polygon"
+        )
+        if self._is_edge_selected() and (
+            inserts_polygon_vertex or modifiers == Qt.KeyboardModifier.AltModifier
+        ):
+            self._add_point_to_edge(point=pos)
             return False
         if self._is_vertex_selected() and modifiers == (
             Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.ShiftModifier

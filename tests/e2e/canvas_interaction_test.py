@@ -260,7 +260,7 @@ def test_add_point_on_edge(
     qtbot.mouseClick(
         canvas,
         Qt.MouseButton.LeftButton,
-        Qt.KeyboardModifier.AltModifier,
+        Qt.KeyboardModifier.NoModifier,
         pos=mid_widget,
     )
     qtbot.wait(50)
