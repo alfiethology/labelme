@@ -21,10 +21,12 @@ ShapeType: TypeAlias = Literal[
     "circle",
     "linestrip",
     "points",
+    "skeleton",
     "mask",
 ]
 
 POLYLINE_SHAPE_TYPES: Final[tuple[ShapeType, ...]] = ("polygon", "linestrip")
+ROTATION_HANDLE_OFFSET_PX: Final[float] = 24.0
 
 
 @dataclasses.dataclass(eq=False)
@@ -157,20 +159,53 @@ def nearest_rotation_point_index(
     scale: float,
     epsilon: float,
 ) -> int | None:
-    if shape.shape_type != "oriented_rectangle" or len(shape.points) != 4:
+    if shape.shape_type == "oriented_rectangle" and len(shape.points) == 4:
+        handles = (shape.points + np.roll(shape.points, 1, axis=0)) / 2
+    elif shape.shape_type == "skeleton" and len(shape.points) >= 4:
+        handles = np.array(
+            [
+                get_rotation_handle(
+                    shape=shape, index=0, offset=ROTATION_HANDLE_OFFSET_PX / scale
+                )
+            ]
+        )
+    else:
         return None
-    handles = (shape.points + np.roll(shape.points, 1, axis=0)) / 2
     distances = np.linalg.norm((handles - point) * scale, axis=1)
     return _nearest_index_within_epsilon(distances=distances, epsilon=epsilon)
 
 
-def get_rotation_handle(*, shape: Shape, index: int) -> npt.NDArray[np.float64]:
-    if shape.shape_type != "oriented_rectangle" or len(shape.points) != 4:
+def get_rotation_handle(
+    *, shape: Shape, index: int, offset: float = 0.0
+) -> npt.NDArray[np.float64]:
+    if shape.shape_type == "oriented_rectangle" and len(shape.points) == 4:
+        return (shape.points[index] + shape.points[index - 1]) / 2
+    if shape.shape_type == "skeleton" and len(shape.points) >= 4 and index == 0:
+        center = rotation_center(shape=shape)
+        edge_midpoint = (shape.points[0] + shape.points[1]) / 2
+        outward = edge_midpoint - center
+        length = float(np.linalg.norm(outward))
+        if length == 0:
+            return edge_midpoint
+        return edge_midpoint + outward / length * offset
+    raise ValueError(
+        "Rotation handles are only defined for 4-point oriented rectangles "
+        "and Skeleton Shapes, "
+        f"got shape_type={shape.shape_type!r}, len(points)={len(shape.points)}"
+    )
+
+
+def rotation_center(*, shape: Shape) -> npt.NDArray[np.float64]:
+    if shape.shape_type not in ("oriented_rectangle", "skeleton"):
         raise ValueError(
-            "Rotation handles are only defined for 4-point oriented rectangles, "
-            f"got shape_type={shape.shape_type!r}, len(points)={len(shape.points)}"
+            "Rotation center is only defined for oriented rectangles and "
+            f"Skeleton Shapes, got {shape.shape_type!r}"
         )
-    return (shape.points[index] + shape.points[index - 1]) / 2
+    if len(shape.points) < 4:
+        raise ValueError(
+            f"Rotation center requires at least 4 points, got {len(shape.points)}"
+        )
+    return (shape.points[0] + shape.points[2]) / 2
 
 
 def oriented_rectangle_center(*, shape: Shape) -> npt.NDArray[np.float64]:
@@ -182,7 +217,7 @@ def oriented_rectangle_center(*, shape: Shape) -> npt.NDArray[np.float64]:
         raise ValueError(
             f"Oriented rectangle center requires 4 points, got {len(shape.points)}"
         )
-    return (shape.points[0] + shape.points[2]) / 2
+    return rotation_center(shape=shape)
 
 
 _ARROW_HEAD_BACK_OFFSET: Final[float] = 0.22
@@ -219,15 +254,17 @@ def rotate(
     angle: float,
     source_points: npt.NDArray[np.float64] | None = None,
 ) -> None:
-    if shape.shape_type != "oriented_rectangle":
+    if shape.shape_type not in ("oriented_rectangle", "skeleton"):
         raise ValueError(
-            "Shape rotation is only supported for oriented rectangles, "
+            "Shape rotation is only supported for oriented rectangles and "
+            "Skeleton Shapes, "
             f"got {shape.shape_type!r}"
         )
     points = shape.points if source_points is None else source_points
-    if len(points) != 4 or len(shape.points) != 4:
+    minimum_points = 4
+    if len(points) < minimum_points or len(shape.points) != len(points):
         raise ValueError(
-            "Shape rotation requires 4 points, got "
+            "Shape rotation requires matching arrays with at least 4 points, got "
             f"len(source_points)={len(points)}, len(shape.points)={len(shape.points)}"
         )
     rotated = _rotate_points_around_origin(points=points - center, angle=angle) + center

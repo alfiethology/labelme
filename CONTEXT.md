@@ -62,6 +62,18 @@ _Avoid_: raster shape, pixel polygon; do not say "mask" when you mean the whole 
 The boolean pixel array inside a Mask Shape — one bit per pixel of the Mask Shape's bbox indicating whether the pixel belongs to the annotated region. Serialized as a base64-encoded PNG inside the Annotation File.
 _Avoid_: bitmap, raster, segmentation map (when you mean just this Shape's pixels).
 
+**Skeleton Shape**:
+A composite Shape for one pose instance. It owns an oriented transform box, an ordered list of named keypoints, the bones connecting those keypoints, and one visibility value per keypoint. Its `shape_type` is `skeleton`. The first four stored points are the transform-box corners and the remaining points are keypoints in export order. YOLO export uses the axis-aligned box enclosing the transform box.
+_Avoid_: pose (the task/result rather than the persisted Shape), collection of points, keypoint group.
+
+**Skeleton Template**:
+A reusable `.skeleton.json` definition containing an animal Label, ordered keypoint names, bones, horizontal-flip indices, and a normalized neutral layout. Placing one creates an independent Skeleton Shape that embeds the definition it needs, so its Annotation can round-trip without the template file.
+_Avoid_: skeleton file (when referring to the reusable concept), pose config, keypoint schema.
+
+**Keypoint Visibility**:
+The per-keypoint YOLO/COCO-style state on a Skeleton Shape: `0` means missing/unlabeled, `1` means labeled but occluded, and `2` means visible.
+_Avoid_: confidence (it is an annotation state, not a model score).
+
 **Image**:
 An input image file (PNG, JPEG, TIFF, etc.) that is the subject of an Annotation. Identified by its path on disk. The in-memory pixel array used while annotating is an implementation concern and not part of this term.
 _Avoid_: photo, picture, file, frame.

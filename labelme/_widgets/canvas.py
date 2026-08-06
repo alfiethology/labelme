@@ -24,6 +24,7 @@ from PySide6.QtCore import Qt
 from .. import _automation
 from .. import _shape
 from .. import _utils
+from .._pose import ensure_skeleton_oriented_bbox
 from .._shape import POLYLINE_SHAPE_TYPES
 from .._shape import Shape
 from .._shape import ShapeType
@@ -40,6 +41,16 @@ from .download import download_ai_model
 
 _DEFAULT_SHAPE_RGB: Final[tuple[int, int, int]] = (255, 255, 0)
 _DEFAULT_PALETTE: Final[Palette] = Palette.from_rgb(rgb=_DEFAULT_SHAPE_RGB)
+
+
+@dataclasses.dataclass(frozen=True)
+class SkeletonDrawingResult:
+    names: tuple[str, ...]
+    points: tuple[QPointF, ...]
+    edges: tuple[tuple[int, int], ...]
+
+
+_SkeletonDrawingMode = Literal["nodes", "edges"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -183,6 +194,9 @@ class Canvas(QtWidgets.QWidget):
     mouse_moved = QtCore.Signal(QPointF)
     status_updated = QtCore.Signal(str)
     zoom_rect_selected = QtCore.Signal(QRectF)
+    skeleton_node_requested = QtCore.Signal(QPointF)
+    skeleton_finish_requested = QtCore.Signal()
+    skeleton_drawing_cancelled = QtCore.Signal()
 
     mode: _CanvasMode = _CanvasMode.EDIT
 
@@ -274,6 +288,11 @@ class Canvas(QtWidgets.QWidget):
         self._point_type: Literal["square", "round"] = "round"
         self._draft_palette = _DEFAULT_PALETTE
         self._palette_cache = {}
+        self._skeleton_drawing_mode: _SkeletonDrawingMode | None = None
+        self._skeleton_node_names: list[str] = []
+        self._skeleton_node_points: list[QPointF] = []
+        self._skeleton_edges: list[tuple[int, int]] = []
+        self._skeleton_edge_start: int | None = None
         self.context_menus = _canvas_interaction.ContextMenuPair(
             without_selection=QtWidgets.QMenu(),
             with_selection=QtWidgets.QMenu(),
@@ -382,7 +401,96 @@ class Canvas(QtWidgets.QWidget):
 
     @property
     def is_drawing(self) -> bool:
-        return self._current is not None
+        return self._current is not None or self.is_drawing_skeleton
+
+    @property
+    def is_drawing_skeleton(self) -> bool:
+        return self._skeleton_drawing_mode is not None
+
+    @property
+    def skeleton_drawing_mode(self) -> _SkeletonDrawingMode | None:
+        return self._skeleton_drawing_mode
+
+    def start_skeleton_drawing(self) -> None:
+        if self._current is not None:
+            self._cancel_current_shape()
+        self.deselect_shape()
+        self.mode = _CanvasMode.CREATE
+        self._skeleton_drawing_mode = "nodes"
+        self._skeleton_node_names = []
+        self._skeleton_node_points = []
+        self._skeleton_edges = []
+        self._skeleton_edge_start = None
+        self._apply_cursor(CursorRole.DRAW)
+        self.update()
+        self._update_status()
+
+    def set_skeleton_drawing_mode(self, mode: _SkeletonDrawingMode) -> None:
+        if not self.is_drawing_skeleton:
+            return
+        self._skeleton_drawing_mode = mode
+        self._skeleton_edge_start = None
+        self.update()
+        self._update_status()
+
+    def add_skeleton_node(self, *, name: str, point: QPointF) -> None:
+        if self._skeleton_drawing_mode != "nodes":
+            raise RuntimeError("skeleton nodes can only be added in node mode")
+        name = name.strip()
+        if not name:
+            raise ValueError("skeleton node name must not be empty")
+        if name in self._skeleton_node_names:
+            raise ValueError(f"skeleton node name already exists: {name!r}")
+        self._skeleton_node_names.append(name)
+        self._skeleton_node_points.append(QPointF(point))
+        self.update()
+        self._update_status()
+
+    def undo_skeleton_step(self) -> None:
+        if self._skeleton_drawing_mode == "edges" and self._skeleton_edges:
+            self._skeleton_edges.pop()
+            self._skeleton_edge_start = None
+        elif self._skeleton_drawing_mode == "nodes" and self._skeleton_node_points:
+            removed = len(self._skeleton_node_points) - 1
+            self._skeleton_node_points.pop()
+            self._skeleton_node_names.pop()
+            self._skeleton_edges = [
+                edge for edge in self._skeleton_edges if removed not in edge
+            ]
+            self._skeleton_edge_start = None
+        self.update()
+        self._update_status()
+
+    def skeleton_drawing(self) -> SkeletonDrawingResult:
+        if not self.is_drawing_skeleton:
+            raise RuntimeError("no skeleton drawing is active")
+        return SkeletonDrawingResult(
+            names=tuple(self._skeleton_node_names),
+            points=tuple(QPointF(point) for point in self._skeleton_node_points),
+            edges=tuple(self._skeleton_edges),
+        )
+
+    def take_skeleton_drawing(self) -> SkeletonDrawingResult:
+        result = self.skeleton_drawing()
+        self._clear_skeleton_drawing()
+        return result
+
+    def cancel_skeleton_drawing(self) -> None:
+        if not self.is_drawing_skeleton:
+            return
+        self._clear_skeleton_drawing()
+        self.skeleton_drawing_cancelled.emit()
+
+    def _clear_skeleton_drawing(self) -> None:
+        self._skeleton_drawing_mode = None
+        self._skeleton_node_names = []
+        self._skeleton_node_points = []
+        self._skeleton_edges = []
+        self._skeleton_edge_start = None
+        self.mode = _CanvasMode.EDIT
+        self._release_cursor()
+        self.update()
+        self._update_status()
 
     @property
     def create_mode(self) -> _CreateMode:
@@ -559,6 +667,22 @@ class Canvas(QtWidgets.QWidget):
 
     def _update_status(self, extra_messages: list[str] | None = None) -> None:
         messages: list[str] = []
+        if self._skeleton_drawing_mode == "nodes":
+            messages.append(self.tr("Drawing skeleton nodes"))
+            messages.append(self.tr("Click to place and name a node"))
+            messages.append(self.tr("Enter or Space to finish • Esc to cancel"))
+            self.status_updated.emit(" • ".join(messages))
+            return
+        if self._skeleton_drawing_mode == "edges":
+            messages.append(self.tr("Connecting skeleton nodes"))
+            if self._skeleton_edge_start is None:
+                messages.append(self.tr("Click the first node of a bone"))
+            else:
+                name = self._skeleton_node_names[self._skeleton_edge_start]
+                messages.append(self.tr("Selected %s; click the second node") % name)
+            messages.append(self.tr("Enter or Space to finish • Esc to cancel"))
+            self.status_updated.emit(" • ".join(messages))
+            return
         if self.mode == _CanvasMode.CREATE:
             messages.append(self.tr("Creating %r") % self.create_mode)
             messages.append(self._get_create_mode_message())
@@ -633,6 +757,11 @@ class Canvas(QtWidgets.QWidget):
             return
         if self._pan_anchor is not None:
             self._advance_pan(event=event)
+            return
+        if self.is_drawing_skeleton:
+            self._apply_cursor(CursorRole.DRAW)
+            self.update()
+            self._update_status()
             return
         if self.mode == _CanvasMode.CREATE:
             self._track_drawing_cursor(pos=pos, event=event)
@@ -833,11 +962,11 @@ class Canvas(QtWidgets.QWidget):
         assert self.hovered_shape is not None
         assert self._hovered_rotation is not None
         handle = _shape.get_rotation_handle(
-            shape=self.hovered_shape, index=self._hovered_rotation
+            shape=self.hovered_shape,
+            index=self._hovered_rotation,
+            offset=_shape.ROTATION_HANDLE_OFFSET_PX / self.scale,
         )
-        self._rotation_center = _shape.oriented_rectangle_center(
-            shape=self.hovered_shape
-        )
+        self._rotation_center = _shape.rotation_center(shape=self.hovered_shape)
         self._rotation_initial_angle = _utils.direction_angle(
             start=self._rotation_center, end=handle
         )
@@ -1003,6 +1132,14 @@ class Canvas(QtWidgets.QWidget):
             self._begin_pan(event=event)
 
     def _press_left(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
+        if self.is_drawing_skeleton:
+            if self._should_constrain_to_pixmap(pos):
+                return
+            if self._skeleton_drawing_mode == "nodes":
+                self.skeleton_node_requested.emit(QPointF(pos))
+            else:
+                self._select_skeleton_edge_endpoint(pos=pos)
+            return
         is_shift_pressed = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         if self.mode == _CanvasMode.CREATE:
             self._press_left_while_drawing(
@@ -1441,6 +1578,12 @@ class Canvas(QtWidgets.QWidget):
             )
             return
 
+        if shape.shape_type == "skeleton" and vertex_index < 4:
+            self._bounded_scale_skeleton(
+                shape=shape, vertex_index=vertex_index, pos=pos
+            )
+            return
+
         if self._should_constrain_to_pixmap(pos):
             pos = _compute_intersection_edges_image(
                 QPointF(*shape.points[vertex_index]), pos, image_size=self.pixmap.size()
@@ -1452,6 +1595,39 @@ class Canvas(QtWidgets.QWidget):
             )
 
         shape.move_vertex(i=vertex_index, pos=(pos.x(), pos.y()))
+
+    def _bounded_scale_skeleton(
+        self, *, shape: Shape, vertex_index: int, pos: QPointF
+    ) -> None:
+        ensure_skeleton_oriented_bbox(shape)
+        old_bbox = shape.points[:4].copy()
+        old_keypoints = shape.points[4:].copy()
+        corners = tuple(QPointF(*point) for point in old_bbox)
+        new_corners_qt = _reproject_oriented_rectangle_corners(
+            corners=corners,
+            vertex_index=vertex_index,
+            pos=pos,
+            image_size=self.pixmap.size(),
+            allow_out_of_bounds=self._allow_out_of_bounds_points,
+        )
+        new_bbox = np.array(
+            [[point.x(), point.y()] for point in new_corners_qt], dtype=np.float64
+        )
+        old_basis = np.column_stack(
+            (old_bbox[1] - old_bbox[0], old_bbox[3] - old_bbox[0])
+        )
+        if abs(float(np.linalg.det(old_basis))) <= np.finfo(np.float64).eps:
+            return
+        local = np.linalg.solve(old_basis, (old_keypoints - old_bbox[0]).T).T
+        new_basis = np.column_stack(
+            (new_bbox[1] - new_bbox[0], new_bbox[3] - new_bbox[0])
+        )
+        new_keypoints = (
+            new_bbox[0]
+            + local[:, 0, None] * new_basis[:, 0]
+            + local[:, 1, None] * new_basis[:, 1]
+        )
+        shape.points = np.vstack((new_bbox, new_keypoints))
 
     def _bounded_move_oriented_rectangle_vertex(
         self, shape: Shape, vertex_index: int, pos: QPointF
@@ -1569,10 +1745,85 @@ class Canvas(QtWidgets.QWidget):
             self._draw_crosshair_layer,
             self._draw_committed_shapes_layer,
             self._draw_center_dots_layer,
+            self._draw_skeleton_drawing_layer,
             self._draw_active_shape_layer,
             self._draw_drag_copy_layer,
             self._draw_preview_overlay_layer,
         )
+
+    def _draw_skeleton_drawing_layer(self, painter: QtGui.QPainter) -> None:
+        if not self.is_drawing_skeleton:
+            return
+        painter.save()
+        try:
+            line_color = self._draft_palette.line
+            pen = QtGui.QPen(line_color)
+            pen.setWidth(2)
+            painter.setPen(pen)
+            for start, end in self._skeleton_edges:
+                painter.drawLine(
+                    self._skeleton_node_points[start] * self.scale,
+                    self._skeleton_node_points[end] * self.scale,
+                )
+            if self._skeleton_edge_start is not None:
+                preview_pen = QtGui.QPen(line_color)
+                preview_pen.setWidth(2)
+                preview_pen.setStyle(Qt.PenStyle.DashLine)
+                painter.setPen(preview_pen)
+                painter.drawLine(
+                    self._skeleton_node_points[self._skeleton_edge_start] * self.scale,
+                    self._prev_move_point * self.scale,
+                )
+                painter.setPen(pen)
+            for index, (name, point) in enumerate(
+                zip(
+                    self._skeleton_node_names,
+                    self._skeleton_node_points,
+                    strict=True,
+                )
+            ):
+                center = point * self.scale
+                selected = index == self._skeleton_edge_start
+                radius = 7.0 if selected else 5.0
+                painter.setBrush(
+                    self._draft_palette.hvertex_fill
+                    if selected
+                    else self._draft_palette.vertex_fill
+                )
+                painter.drawEllipse(center, radius, radius)
+                painter.drawText(center + QPointF(8, -8), name)
+        finally:
+            painter.restore()
+
+    def _select_skeleton_edge_endpoint(self, *, pos: QPointF) -> None:
+        if not self._skeleton_node_points:
+            return
+        query = np.array([pos.x(), pos.y()])
+        points = np.array(
+            [[point.x(), point.y()] for point in self._skeleton_node_points]
+        )
+        distances = np.linalg.norm((points - query) * self.scale, axis=1)
+        index = int(np.argmin(distances))
+        if distances[index] > self._epsilon:
+            return
+        if self._skeleton_edge_start is None:
+            self._skeleton_edge_start = index
+        else:
+            start = self._skeleton_edge_start
+            self._skeleton_edge_start = None
+            if start == index:
+                self.update()
+                return
+            edge = (start, index)
+            reverse = (index, start)
+            if edge in self._skeleton_edges:
+                self._skeleton_edges.remove(edge)
+            elif reverse in self._skeleton_edges:
+                self._skeleton_edges.remove(reverse)
+            else:
+                self._skeleton_edges.append(edge)
+        self.update()
+        self._update_status()
 
     def _draw_pixmap_layer(self, painter: QtGui.QPainter) -> None:
         target = QtCore.QRectF(
@@ -1858,6 +2109,15 @@ class Canvas(QtWidgets.QWidget):
     def keyPressEvent(self, a0: QtGui.QKeyEvent) -> None:
         modifiers = a0.modifiers()
         key = a0.key()
+        if self.is_drawing_skeleton:
+            if key == Qt.Key.Key_Escape:
+                self.cancel_skeleton_drawing()
+            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Space):
+                self.skeleton_finish_requested.emit()
+            elif a0.matches(QtGui.QKeySequence.StandardKey.Undo):
+                self.undo_skeleton_step()
+            self._update_status()
+            return
         if self.mode == _CanvasMode.CREATE:
             if key == Qt.Key.Key_Escape and self._current is not None:
                 self._cancel_current_shape()
@@ -1973,12 +2233,20 @@ class Canvas(QtWidgets.QWidget):
             self._cancel_current_shape()
 
     def _reset_interaction_state(self) -> None:
+        was_drawing_skeleton = self.is_drawing_skeleton
+        self._skeleton_drawing_mode = None
+        self._skeleton_node_names = []
+        self._skeleton_node_points = []
+        self._skeleton_edges = []
+        self._skeleton_edge_start = None
         self._current = None
         self.hovered_shape = None
         self._hovered_vertex = None
         self._hovered_edge = None
         self._hovered_rotation = None
         self._clear_highlight_state()
+        if was_drawing_skeleton:
+            self.skeleton_drawing_cancelled.emit()
 
     def load_pixmap(self, pixmap: QtGui.QPixmap, clear_shapes: bool = True) -> None:
         pixmap_arr = _utils.img_qt_to_arr(img_qt=pixmap.toImage())
@@ -2029,6 +2297,11 @@ class Canvas(QtWidgets.QWidget):
         self._is_moving_shape = False
         self.selected_shapes = []
         self._selected_shapes_copy = []
+        self._skeleton_drawing_mode = None
+        self._skeleton_node_names = []
+        self._skeleton_node_points = []
+        self._skeleton_edges = []
+        self._skeleton_edge_start = None
         self._current = None
         self._highlight = None
         self._rotation_highlight = None

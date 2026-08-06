@@ -44,6 +44,14 @@ from ._label_file import read_image_file
 from ._label_file import read_label_file
 from ._label_file import write_label_file
 from ._label_flags import compile_label_flags
+from ._pose import SkeletonTemplate
+from ._pose import ensure_skeleton_oriented_bbox
+from ._pose import make_skeleton_shape
+from ._pose import make_skeleton_shape_from_nodes
+from ._pose import read_skeleton_file
+from ._pose import skeleton_template_from_shape
+from ._pose import write_skeleton_file
+from ._pose_export import export_yolo_pose_dataset
 from ._shape import Shape
 from ._shape import ShapeType
 from ._shape_clipboard import ShapeClipboard
@@ -888,6 +896,7 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu = self.menu(self.tr("&File"))
         edit_menu = self.menu(self.tr("&Edit"))
         view_menu = self.menu(self.tr("&View"))
+        pose_menu = self.menu(self.tr("&Pose"))
         help_menu = self.menu(self.tr("&Help"))
         label_menu = QtWidgets.QMenu()
         _utils.add_actions(label_menu, (self._actions.edit, self._actions.delete))
@@ -919,6 +928,42 @@ class MainWindow(QtWidgets.QMainWindow):
             ),
         )
         _utils.add_actions(help_menu, (help_, self._actions.about))
+        _utils.add_actions(
+            pose_menu,
+            (
+                action(
+                    self.tr("Draw Skeleton…"),
+                    self._new_skeleton,
+                    tip=self.tr("Place, name, and connect skeleton nodes on the image"),
+                ),
+                action(
+                    self.tr("Place Skeleton From File…"),
+                    self._place_skeleton_from_file,
+                    tip=self.tr("Load a skeleton template and place it on the image"),
+                ),
+                action(
+                    self.tr("Save Selected Skeleton As Template…"),
+                    self._save_selected_skeleton_template,
+                    tip=self.tr("Save the selected skeleton for reuse"),
+                ),
+                None,
+                action(
+                    self.tr("Set Keypoint Visibility…"),
+                    self._set_skeleton_keypoint_visibility,
+                    tip=self.tr(
+                        "Mark a skeleton keypoint missing, occluded, or visible"
+                    ),
+                ),
+                None,
+                action(
+                    self.tr("Export YOLO Pose Dataset…"),
+                    self._export_yolo_pose_dataset,
+                    tip=self.tr(
+                        "Convert a directory of annotations into a YOLO pose dataset"
+                    ),
+                ),
+            ),
+        )
         _utils.add_actions(
             view_menu,
             (
@@ -971,7 +1016,343 @@ class MainWindow(QtWidgets.QMainWindow):
             label_list=label_menu,
         )
 
+    def _new_skeleton(self) -> None:
+        if self._image.isNull():
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Draw Skeleton"),
+                self.tr("Open an image before creating a skeleton."),
+            )
+            return
+        label, accepted = QtWidgets.QInputDialog.getText(
+            self, self.tr("Draw Skeleton"), self.tr("Animal class label:")
+        )
+        label = label.strip()
+        if not accepted or not label:
+            return
+        self._skeleton_drawing_label = label
+        self._canvas_widgets.canvas.start_skeleton_drawing()
+        self._skeleton_place_action.setChecked(True)
+        self._skeleton_drawing_toolbar.show()
+
+    def _name_skeleton_node(self, point: QtCore.QPointF) -> None:
+        name, accepted = QtWidgets.QInputDialog.getText(
+            self,
+            self.tr("Name Skeleton Node"),
+            self.tr("Node name (this determines YOLO export order):"),
+        )
+        if not accepted:
+            return
+        try:
+            self._canvas_widgets.canvas.add_skeleton_node(name=name, point=point)
+        except ValueError as error:
+            self.show_error_message(
+                self.tr("Invalid node name"), self.tr("<b>%s</b>") % error
+            )
+
+    def _set_skeleton_drawing_mode(self, mode: str) -> None:
+        if mode not in ("nodes", "edges"):
+            raise ValueError(f"unexpected skeleton drawing mode: {mode!r}")
+        if mode == "nodes":
+            self._canvas_widgets.canvas.set_skeleton_drawing_mode("nodes")
+        else:
+            self._canvas_widgets.canvas.set_skeleton_drawing_mode("edges")
+
+    def _finish_skeleton_drawing(self) -> None:
+        canvas = self._canvas_widgets.canvas
+        if not canvas.is_drawing_skeleton:
+            return
+        drawing = canvas.skeleton_drawing()
+        if not drawing.points:
+            self.show_error_message(
+                self.tr("Invalid skeleton"),
+                self.tr("Place at least one named node before finishing."),
+            )
+            return
+        flip_idx = self._prompt_skeleton_flip_idx(names=drawing.names)
+        if flip_idx is None:
+            return
+        shape = make_skeleton_shape_from_nodes(
+            label=self._skeleton_drawing_label,
+            keypoints=drawing.names,
+            points=np.array([[point.x(), point.y()] for point in drawing.points]),
+            edges=drawing.edges,
+            flip_idx=flip_idx,
+        )
+        canvas.take_skeleton_drawing()
+        self._finish_skeleton_drawing_ui()
+        self._insert_shapes([shape])
+        self._switch_canvas_mode(edit=True)
+
+    def _prompt_skeleton_flip_idx(
+        self, *, names: tuple[str, ...]
+    ) -> tuple[int, ...] | None:
+        text, accepted = QtWidgets.QInputDialog.getMultiLineText(
+            self,
+            self.tr("Horizontal Mirror Pairs"),
+            self.tr(
+                "Optional left/right pairs, one per line as two comma-separated "
+                "node names:"
+            ),
+        )
+        if not accepted:
+            return None
+        indices = {name: index for index, name in enumerate(names)}
+        flip_idx = list(range(len(names)))
+        paired: set[int] = set()
+        try:
+            for line in text.splitlines():
+                if not line.strip():
+                    continue
+                pair = [name.strip() for name in line.split(",")]
+                if len(pair) != 2 or any(name not in indices for name in pair):
+                    raise ValueError(
+                        self.tr(
+                            "Each mirror pair must contain two existing node names."
+                        )
+                    )
+                left, right = (indices[name] for name in pair)
+                if left == right or left in paired or right in paired:
+                    raise ValueError(
+                        self.tr("Mirror pairs must contain distinct, unpaired nodes.")
+                    )
+                flip_idx[left] = right
+                flip_idx[right] = left
+                paired.update((left, right))
+        except ValueError as error:
+            self.show_error_message(
+                self.tr("Invalid mirror pairs"), self.tr("<b>%s</b>") % error
+            )
+            return None
+        return tuple(flip_idx)
+
+    def _finish_skeleton_drawing_ui(self) -> None:
+        self._skeleton_drawing_toolbar.hide()
+        self._skeleton_drawing_label = ""
+
+    def _on_skeleton_drawing_cancelled(self) -> None:
+        self._finish_skeleton_drawing_ui()
+
+    def _place_skeleton_from_file(self) -> None:
+        if self._image.isNull():
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Place Skeleton"),
+                self.tr("Open an image before placing a skeleton."),
+            )
+            return
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("Open Skeleton Template"),
+            str(Path(self._image_path).parent) if self._image_path else "",
+            self.tr("Skeleton templates (*.skeleton.json);;JSON files (*.json)"),
+        )
+        if not filename:
+            return
+        try:
+            skeleton = read_skeleton_file(filename)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+            self.show_error_message(
+                self.tr("Error loading skeleton template"),
+                self.tr("<b>%s</b>") % error,
+            )
+            return
+        self._place_skeleton(skeleton)
+
+    def _place_skeleton(self, skeleton: SkeletonTemplate) -> None:
+        width = self._image.width()
+        height = self._image.height()
+        shape = make_skeleton_shape(
+            skeleton=skeleton,
+            bounds=(width * 0.2, height * 0.2, width * 0.8, height * 0.8),
+        )
+        self._insert_shapes([shape])
+        self._switch_canvas_mode(edit=True)
+
+    def _save_selected_skeleton_template(self) -> None:
+        selected = self._canvas_widgets.canvas.selected_shapes
+        if len(selected) != 1 or selected[0].shape_type != "skeleton":
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Save Skeleton Template"),
+                self.tr("Select exactly one skeleton to save as a template."),
+            )
+            return
+        filename, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            self.tr("Save Skeleton Template"),
+            f"{selected[0].label or 'skeleton'}.skeleton.json",
+            self.tr("Skeleton templates (*.skeleton.json)"),
+        )
+        if not filename:
+            return
+        if not filename.lower().endswith(".skeleton.json"):
+            filename += ".skeleton.json"
+        try:
+            skeleton = skeleton_template_from_shape(selected[0])
+            write_skeleton_file(filename, skeleton=skeleton)
+        except (OSError, TypeError, ValueError) as error:
+            self.show_error_message(
+                self.tr("Error saving skeleton template"),
+                self.tr("<b>%s</b>") % error,
+            )
+
+    def _set_skeleton_keypoint_visibility(self) -> None:
+        selected = self._canvas_widgets.canvas.selected_shapes
+        if len(selected) != 1 or selected[0].shape_type != "skeleton":
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Set Keypoint Visibility"),
+                self.tr("Select exactly one skeleton first."),
+            )
+            return
+        shape = selected[0]
+        pose_data = shape.other_data.get("pose")
+        if not isinstance(pose_data, dict):
+            self.show_error_message(
+                self.tr("Invalid skeleton"),
+                self.tr("The selected skeleton has no pose metadata."),
+            )
+            return
+        keypoints = pose_data.get("keypoints")
+        visibility = pose_data.get("visibility")
+        if not (
+            isinstance(keypoints, list)
+            and all(isinstance(name, str) for name in keypoints)
+            and isinstance(visibility, list)
+            and len(visibility) == len(keypoints)
+            and all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value in (0, 1, 2)
+                for value in visibility
+            )
+        ):
+            self.show_error_message(
+                self.tr("Invalid skeleton"),
+                self.tr("The selected skeleton has invalid keypoint metadata."),
+            )
+            return
+        keypoint, accepted = QtWidgets.QInputDialog.getItem(
+            self,
+            self.tr("Set Keypoint Visibility"),
+            self.tr("Keypoint:"),
+            keypoints,
+            editable=False,
+        )
+        if not accepted:
+            return
+        states = [
+            self.tr("Visible (2)"),
+            self.tr("Occluded (1)"),
+            self.tr("Missing (0)"),
+        ]
+        state, accepted = QtWidgets.QInputDialog.getItem(
+            self,
+            self.tr("Set Keypoint Visibility"),
+            self.tr("Visibility:"),
+            states,
+            editable=False,
+        )
+        if not accepted:
+            return
+        visibility[keypoints.index(keypoint)] = {
+            states[0]: 2,
+            states[1]: 1,
+            states[2]: 0,
+        }[state]
+        self._canvas_widgets.canvas.backup_shapes()
+        self._canvas_widgets.canvas.update()
+        self.mark_dirty()
+
+    def _export_yolo_pose_dataset(self) -> None:
+        start_dir = str(Path(self._image_path).parent) if self._image_path else ""
+        annotation_dir = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            self.tr("Choose Annotation Directory"),
+            start_dir,
+        )
+        if not annotation_dir:
+            return
+        output_dir = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            self.tr("Choose Empty YOLO Dataset Directory"),
+            str(Path(annotation_dir).parent),
+        )
+        if not output_dir:
+            return
+        try:
+            result = export_yolo_pose_dataset(
+                annotation_dir=annotation_dir, output_dir=output_dir
+            )
+        except (OSError, TypeError, ValueError) as error:
+            self.show_error_message(
+                self.tr("Error exporting YOLO pose dataset"),
+                self.tr("<b>%s</b>") % error,
+            )
+            return
+        QtWidgets.QMessageBox.information(
+            self,
+            self.tr("YOLO Pose Export Complete"),
+            self.tr("Exported %d images and %d pose instances across %d classes.")
+            % (result.images, result.instances, len(result.classes)),
+        )
+
     def _setup_toolbars(self) -> None:
+        action = functools.partial(_utils.new_action, self)
+        self._skeleton_drawing_label = ""
+        self._skeleton_place_action = action(
+            self.tr("Place Nodes"),
+            lambda: self._set_skeleton_drawing_mode("nodes"),
+            tip=self.tr("Click the image to place and name skeleton nodes"),
+            checkable=True,
+            checked=True,
+        )
+        self._skeleton_connect_action = action(
+            self.tr("Connect Nodes"),
+            lambda: self._set_skeleton_drawing_mode("edges"),
+            tip=self.tr("Click two nodes to add or remove a bone"),
+            checkable=True,
+        )
+        skeleton_mode_group = QtGui.QActionGroup(self)
+        skeleton_mode_group.setExclusive(True)
+        skeleton_mode_group.addAction(self._skeleton_place_action)
+        skeleton_mode_group.addAction(self._skeleton_connect_action)
+        skeleton_undo_action = action(
+            self.tr("Undo Step"),
+            self._canvas_widgets.canvas.undo_skeleton_step,
+            tip=self.tr("Remove the last node or bone from this skeleton draft"),
+        )
+        skeleton_finish_action = action(
+            self.tr("Finish Skeleton"),
+            self._finish_skeleton_drawing,
+            tip=self.tr("Finish this skeleton and create an editable Shape"),
+        )
+        skeleton_cancel_action = action(
+            self.tr("Cancel"),
+            self._canvas_widgets.canvas.cancel_skeleton_drawing,
+            tip=self.tr("Discard this skeleton draft"),
+        )
+        self._skeleton_drawing_toolbar = ToolBar(
+            title="DrawSkeleton",
+            actions=[
+                self._skeleton_place_action,
+                self._skeleton_connect_action,
+                skeleton_undo_action,
+                None,
+                skeleton_finish_action,
+                skeleton_cancel_action,
+            ],
+            button_style=Qt.ToolButtonStyle.ToolButtonTextOnly,
+            font_base=self.font(),
+        )
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self._skeleton_drawing_toolbar)
+        self._skeleton_drawing_toolbar.hide()
+        canvas = self._canvas_widgets.canvas
+        canvas.skeleton_node_requested.connect(self._name_skeleton_node)
+        canvas.skeleton_finish_requested.connect(self._finish_skeleton_drawing)
+        canvas.skeleton_drawing_cancelled.connect(self._on_skeleton_drawing_cancelled)
+
         select_ai_model = QtWidgets.QWidgetAction(self)
         select_ai_model.setDefaultWidget(self._ai_annotation)
 
@@ -1639,6 +2020,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _switch_canvas_mode(
         self, edit: bool = True, create_mode: str | None = None
     ) -> None:
+        if self._canvas_widgets.canvas.is_drawing_skeleton:
+            self._canvas_widgets.canvas.cancel_skeleton_drawing()
         if create_mode == "ai_points_to_shape":
             model_name = self._canvas_widgets.canvas.get_ai_model_name()
             if not _ai_models.supports_point_prompts(model_name=model_name):
@@ -3319,6 +3702,8 @@ def _shapes_from_dicts(
         shape.flags = default_flags
         shape.flags.update(shape_dict["flags"])
         shape.other_data = shape_dict["other_data"]
+        if shape.shape_type == "skeleton":
+            ensure_skeleton_oriented_bbox(shape)
 
         shapes.append(shape)
     return shapes
