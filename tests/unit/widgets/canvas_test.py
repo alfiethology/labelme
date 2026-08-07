@@ -173,6 +173,47 @@ def test_drag_skeleton_rotation_handle_rotates_box_and_keypoints(
 
 
 @pytest.mark.gui
+def test_hovered_skeleton_keypoint_excludes_transform_box(canvas: Canvas) -> None:
+    shape = _make_skeleton()
+    canvas.load_shapes(shapes=[shape])
+    canvas.hovered_shape = shape
+
+    canvas._hovered_vertex = 0
+    assert canvas._hovered_skeleton_keypoint() is None
+
+    canvas._hovered_vertex = 5
+    assert canvas._hovered_skeleton_keypoint() == (shape, 1)
+
+
+@pytest.mark.gui
+def test_set_skeleton_keypoint_visibility_changes_only_requested_point(
+    canvas: Canvas,
+) -> None:
+    shape = _make_skeleton()
+
+    changed = canvas._set_skeleton_keypoint_visibility(
+        shape=shape, keypoint_index=0, state=1
+    )
+
+    assert changed is True
+    assert shape.other_data["pose"]["visibility"] == [1, 2]
+
+
+@pytest.mark.gui
+def test_set_skeleton_keypoint_visibility_ignores_unchanged_state(
+    canvas: Canvas,
+) -> None:
+    shape = _make_skeleton()
+
+    changed = canvas._set_skeleton_keypoint_visibility(
+        shape=shape, keypoint_index=0, state=2
+    )
+
+    assert changed is False
+    assert shape.other_data["pose"]["visibility"] == [2, 2]
+
+
+@pytest.mark.gui
 def test_drag_hovered_rotation_point_does_not_drift_on_repeated_drags(
     canvas: Canvas,
 ) -> None:

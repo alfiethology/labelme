@@ -162,6 +162,9 @@ class _ShapePaths:
     negative_vertices: QtGui.QPainterPath = dataclasses.field(
         default_factory=QtGui.QPainterPath
     )
+    missing_vertices: QtGui.QPainterPath = dataclasses.field(
+        default_factory=QtGui.QPainterPath
+    )
     rotation_vertices: QtGui.QPainterPath = dataclasses.field(
         default_factory=QtGui.QPainterPath
     )
@@ -214,6 +217,12 @@ def _paint_shape_points(
         painter.setPen(neg_pen)
         painter.drawPath(paths.negative_vertices)
         painter.fillPath(paths.negative_vertices, neg_color)
+
+    if paths.missing_vertices.length() > 0:
+        missing_pen = QtGui.QPen(QtGui.QColor(128, 128, 128, 220))
+        missing_pen.setWidth(PEN_WIDTH)
+        painter.setPen(missing_pen)
+        painter.drawPath(paths.missing_vertices)
 
 
 def _paint_filled_vertices(
@@ -296,6 +305,17 @@ def _draw_vertex(
         path.addEllipse(pos, half, half)
     else:
         raise ValueError(f"Unsupported vertex shape: {point_type}")
+
+
+def _draw_missing_vertex(
+    *, path: QtGui.QPainterPath, pos: QtCore.QPointF, size: float
+) -> None:
+    half = size / 2.0
+    path.addEllipse(pos, half, half)
+    path.moveTo(pos.x() - half, pos.y() - half)
+    path.lineTo(pos.x() + half, pos.y() + half)
+    path.moveTo(pos.x() + half, pos.y() - half)
+    path.lineTo(pos.x() - half, pos.y() + half)
 
 
 def _build_shape_oriented_rectangle_arrow_path(
@@ -439,7 +459,19 @@ def _build_shape_points_paths(
                 path=paths.vertices, shape=shape, context=context, vertex_index=i
             )
         for i in range(len(keypoints)):
+            vertex_index = i + bbox_count
             if len(visibility) == len(keypoints) and visibility[i] == 0:
+                size, _ = _resolve_vertex_style(
+                    highlight=context.highlight,
+                    vertex_index=vertex_index,
+                    default_size=context.point_size,
+                    default_point_type=context.point_type,
+                )
+                _draw_missing_vertex(
+                    path=paths.missing_vertices,
+                    pos=QtCore.QPointF(*(shape.points[vertex_index] * scale)),
+                    size=size,
+                )
                 continue
             vertex_path = (
                 paths.negative_vertices
@@ -450,7 +482,7 @@ def _build_shape_points_paths(
                 path=vertex_path,
                 shape=shape,
                 context=context,
-                vertex_index=i + bbox_count,
+                vertex_index=vertex_index,
             )
     else:
         paths.line.moveTo(QtCore.QPointF(*(points[0] * scale)))

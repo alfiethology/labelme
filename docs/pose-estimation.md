@@ -22,15 +22,27 @@ the [Ultralytics YOLO pose dataset format](https://docs.ultralytics.com/datasets
    whole pose: the box, joints, and bones scale together. Drag the circular
    handle above the box to rotate the entire pose. Drag an individual joint to
    refine just that joint.
-7. Select one Skeleton Shape and use **Pose > Set Keypoint Visibility…**. Choose
+7. Right-click a keypoint and choose its visibility from the menu beside the
+   cursor. Alternatively, select one Skeleton Shape and use
+   **Pose > Set Keypoint Visibility…**. Choose
    **Occluded (1)** when the joint is hidden but its position can still be
    inferred and annotated; choose **Missing (0)** when it cannot be located or
-   lies outside the image. Occluded joints are shown in red and missing joints
-   and their connected bones are hidden. Choose **Visible (2)** to restore one.
+   lies outside the image. Occluded joints are shown in red. Missing joints use
+   a grey crossed marker so they can still be right-clicked, while their
+   connected bones are hidden. Choose **Visible (2)** to restore one.
 8. With the Skeleton Shape selected, choose
    **Pose > Save Selected Skeleton As Template…**.
 9. On another image, choose **Pose > Place Skeleton From File…**, then adjust
    the box and joints for that animal.
+
+After a template has been opened or saved once, Labelme remembers it. Click
+**Skeleton** in the left-hand shape toolbar to open a menu of remembered
+templates at the cursor. Choose a template to place it immediately, or use
+**Browse for Template…** or **Draw New Skeleton…** from the same menu. Up to ten
+recent templates are retained between Labelme sessions; missing or invalid files
+are removed from the menu automatically. A template is initially placed at the
+centre of the image at 20% of the image width and height, ready to be resized or
+rotated.
 
 The template uses the suffix `.skeleton.json`. A placed Skeleton Shape embeds
 its keypoint definition in the Annotation File, so annotations remain loadable

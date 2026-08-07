@@ -25,6 +25,7 @@ from .. import _automation
 from .. import _shape
 from .. import _utils
 from .._pose import ensure_skeleton_oriented_bbox
+from .._pose import skeleton_shape_parts
 from .._shape import POLYLINE_SHAPE_TYPES
 from .._shape import Shape
 from .._shape import ShapeType
@@ -293,6 +294,7 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_node_points: list[QPointF] = []
         self._skeleton_edges: list[tuple[int, int]] = []
         self._skeleton_edge_start: int | None = None
+        self._skeleton_visibility_target: tuple[Shape, int] | None = None
         self.context_menus = _canvas_interaction.ContextMenuPair(
             without_selection=QtWidgets.QMenu(),
             with_selection=QtWidgets.QMenu(),
@@ -1010,6 +1012,10 @@ class Canvas(QtWidgets.QWidget):
             self._highlight_vertex(index=target.index, mode="move")
             self._apply_cursor(CursorRole.HANDLE)
             status_messages.append(self.tr("Click & drag to move point"))
+            if self._hovered_skeleton_keypoint() is not None:
+                status_messages.append(
+                    self.tr("Right-click to set keypoint visibility")
+                )
             if target.shape.can_remove_point():
                 status_messages.append(self.tr("ALT + SHIFT + Click to delete point"))
             self.update()
@@ -1303,6 +1309,7 @@ class Canvas(QtWidgets.QWidget):
         return False
 
     def _press_right(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
+        self._skeleton_visibility_target = self._hovered_skeleton_keypoint()
         if _should_reselect_on_right_press(
             selected_shapes=self.selected_shapes, hovered_shape=self.hovered_shape
         ):
@@ -1340,6 +1347,16 @@ class Canvas(QtWidgets.QWidget):
             self._finish_pan()
 
     def _release_right(self, event: QtGui.QMouseEvent) -> None:
+        visibility_target = self._skeleton_visibility_target
+        self._skeleton_visibility_target = None
+        if visibility_target is not None and not self._selected_shapes_copy:
+            self._release_cursor()
+            self._show_skeleton_keypoint_visibility_menu(
+                shape=visibility_target[0],
+                keypoint_index=visibility_target[1],
+                global_pos=self.mapToGlobal(event.position().toPoint()),
+            )
+            return
         menu = self.context_menus.menu_for(
             has_selection=len(self._selected_shapes_copy) > 0
         )
@@ -1355,6 +1372,91 @@ class Canvas(QtWidgets.QWidget):
             return
         self._selected_shapes_copy.clear()
         self.update()
+
+    def _hovered_skeleton_keypoint(self) -> tuple[Shape, int] | None:
+        shape = self.hovered_shape
+        vertex_index = self._hovered_vertex
+        if shape is None or shape.shape_type != "skeleton" or vertex_index is None:
+            return None
+        try:
+            bbox, keypoints = skeleton_shape_parts(shape=shape)
+        except ValueError:
+            return None
+        keypoint_index = vertex_index - len(bbox)
+        if not 0 <= keypoint_index < len(keypoints):
+            return None
+        return shape, keypoint_index
+
+    def _show_skeleton_keypoint_visibility_menu(
+        self, *, shape: Shape, keypoint_index: int, global_pos: QPoint
+    ) -> None:
+        pose_data = shape.other_data.get("pose")
+        if not isinstance(pose_data, dict):
+            return
+        keypoints = pose_data.get("keypoints")
+        visibility = pose_data.get("visibility")
+        if not (
+            isinstance(keypoints, list)
+            and isinstance(visibility, list)
+            and len(keypoints) == len(visibility)
+            and 0 <= keypoint_index < len(keypoints)
+            and isinstance(keypoints[keypoint_index], str)
+            and all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value in (0, 1, 2)
+                for value in visibility
+            )
+        ):
+            return
+
+        menu = QtWidgets.QMenu(self)
+        menu.addSection(keypoints[keypoint_index])
+        action_states: dict[QtGui.QAction, int] = {}
+        for text, state in (
+            (self.tr("Visible (2)"), 2),
+            (self.tr("Occluded (1)"), 1),
+            (self.tr("Missing (0)"), 0),
+        ):
+            action = menu.addAction(text)
+            action.setCheckable(True)
+            action.setChecked(visibility[keypoint_index] == state)
+            action_states[action] = state
+        selected_action = menu.exec(global_pos)  # type: ignore
+        if selected_action not in action_states:
+            return
+        new_state = action_states[selected_action]
+        if not self._set_skeleton_keypoint_visibility(
+            shape=shape, keypoint_index=keypoint_index, state=new_state
+        ):
+            return
+        self.backup_shapes()
+        self.update()
+        self.shape_moved.emit()
+
+    def _set_skeleton_keypoint_visibility(
+        self, *, shape: Shape, keypoint_index: int, state: int
+    ) -> bool:
+        pose_data = shape.other_data.get("pose")
+        if shape.shape_type != "skeleton" or not isinstance(pose_data, dict):
+            return False
+        visibility = pose_data.get("visibility")
+        if not (
+            isinstance(visibility, list)
+            and 0 <= keypoint_index < len(visibility)
+            and state in (0, 1, 2)
+            and all(
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value in (0, 1, 2)
+                for value in visibility
+            )
+        ):
+            return False
+        if visibility[keypoint_index] == state:
+            return False
+        visibility[keypoint_index] = state
+        return True
 
     def _release_left(self) -> None:
         if self.mode != _CanvasMode.EDIT:
@@ -2239,6 +2341,7 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_node_points = []
         self._skeleton_edges = []
         self._skeleton_edge_start = None
+        self._skeleton_visibility_target = None
         self._current = None
         self.hovered_shape = None
         self._hovered_vertex = None
@@ -2302,6 +2405,7 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_node_points = []
         self._skeleton_edges = []
         self._skeleton_edge_start = None
+        self._skeleton_visibility_target = None
         self._current = None
         self._highlight = None
         self._rotation_highlight = None

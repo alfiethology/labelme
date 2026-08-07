@@ -135,6 +135,7 @@ class _Actions(NamedTuple):
     edit_mode: QtGui.QAction
     create_rectangle_mode: QtGui.QAction
     create_oriented_rectangle_mode: QtGui.QAction
+    create_skeleton_mode: QtGui.QAction
     create_circle_mode: QtGui.QAction
     create_line_mode: QtGui.QAction
     create_point_mode: QtGui.QAction
@@ -206,6 +207,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _brightness_contrast_values: dict[str, tuple[int | None, int | None]]
     _scroll_values: dict[Qt.Orientation, dict[str, float]]
     _default_state: QtCore.QByteArray
+    _recent_skeleton_template_paths: list[str]
 
     def __init__(
         self,
@@ -529,6 +531,13 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Start drawing oriented rectangles"),
             enabled=False,
         )
+        create_skeleton_mode = action(
+            text=self.tr("Skeleton"),
+            slot=self._choose_skeleton_to_place,
+            icon="phosphor/line-segments.svg",
+            tip=self.tr("Choose a remembered skeleton template to place"),
+            enabled=False,
+        )
         create_circle_mode = action(
             text=self.tr("Circle"),
             slot=lambda: self._switch_canvas_mode(edit=False, create_mode="circle"),
@@ -742,6 +751,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ("polygon", create_mode),
             ("rectangle", create_rectangle_mode),
             ("oriented_rectangle", create_oriented_rectangle_mode),
+            ("skeleton", create_skeleton_mode),
             ("circle", create_circle_mode),
             ("point", create_point_mode),
             ("line", create_line_mode),
@@ -762,6 +772,7 @@ class MainWindow(QtWidgets.QMainWindow):
             create_mode,
             create_rectangle_mode,
             create_oriented_rectangle_mode,
+            create_skeleton_mode,
             create_circle_mode,
             create_line_mode,
             create_point_mode,
@@ -823,6 +834,7 @@ class MainWindow(QtWidgets.QMainWindow):
             edit_mode=edit_mode,
             create_rectangle_mode=create_rectangle_mode,
             create_oriented_rectangle_mode=create_oriented_rectangle_mode,
+            create_skeleton_mode=create_skeleton_mode,
             create_circle_mode=create_circle_mode,
             create_line_mode=create_line_mode,
             create_point_mode=create_point_mode,
@@ -1157,14 +1169,78 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tr("<b>%s</b>") % error,
             )
             return
+        self._remember_skeleton_template(filename)
         self._place_skeleton(skeleton)
+
+    def _choose_skeleton_to_place(self) -> None:
+        if self._image.isNull():
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Place Skeleton"),
+                self.tr("Open an image before placing a skeleton."),
+            )
+            return
+
+        templates = self._recent_skeleton_templates()
+        menu = QtWidgets.QMenu(self)
+        template_actions: dict[QtGui.QAction, SkeletonTemplate] = {}
+        if templates:
+            menu.addSection(self.tr("Skeleton Templates"))
+            for filename, skeleton in templates:
+                template_action = menu.addAction(
+                    self.tr("%s — %s") % (skeleton.label, Path(filename).name)
+                )
+                template_action.setToolTip(filename)
+                template_actions[template_action] = skeleton
+            menu.addSeparator()
+        browse_action = menu.addAction(self.tr("Browse for Template…"))
+        draw_action = menu.addAction(self.tr("Draw New Skeleton…"))
+
+        selected = menu.exec(QtGui.QCursor.pos())  # type: ignore
+        if selected in template_actions:
+            self._place_skeleton(template_actions[selected])
+        elif selected is browse_action:
+            self._place_skeleton_from_file()
+        elif selected is draw_action:
+            self._new_skeleton()
+
+    def _recent_skeleton_templates(
+        self,
+    ) -> list[tuple[str, SkeletonTemplate]]:
+        templates: list[tuple[str, SkeletonTemplate]] = []
+        valid_paths: list[str] = []
+        for filename in self._recent_skeleton_template_paths:
+            try:
+                skeleton = read_skeleton_file(filename)
+            except (OSError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+            templates.append((filename, skeleton))
+            valid_paths.append(filename)
+        if valid_paths != self._recent_skeleton_template_paths:
+            self._recent_skeleton_template_paths = valid_paths
+            self._window_state.setValue("pose/recentSkeletonTemplates", valid_paths)
+        return templates
+
+    def _remember_skeleton_template(self, filename: str) -> None:
+        normalized = str(Path(filename).resolve())
+        self._recent_skeleton_template_paths = [
+            normalized,
+            *(
+                path
+                for path in self._recent_skeleton_template_paths
+                if path != normalized
+            ),
+        ][:10]
+        self._window_state.setValue(
+            "pose/recentSkeletonTemplates", self._recent_skeleton_template_paths
+        )
 
     def _place_skeleton(self, skeleton: SkeletonTemplate) -> None:
         width = self._image.width()
         height = self._image.height()
         shape = make_skeleton_shape(
             skeleton=skeleton,
-            bounds=(width * 0.2, height * 0.2, width * 0.8, height * 0.8),
+            bounds=(width * 0.4, height * 0.4, width * 0.6, height * 0.6),
         )
         self._insert_shapes([shape])
         self._switch_canvas_mode(edit=True)
@@ -1191,6 +1267,7 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             skeleton = skeleton_template_from_shape(selected[0])
             write_skeleton_file(filename, skeleton=skeleton)
+            self._remember_skeleton_template(filename)
         except (OSError, TypeError, ValueError) as error:
             self.show_error_message(
                 self.tr("Error saving skeleton template"),
@@ -1566,10 +1643,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # Restore the window geometry and dock layout (separate from the user
         # Config; this Qt store holds only window state).
         self._window_state = QtCore.QSettings("labelme", "labelme")
+        self._recent_skeleton_template_paths = _normalize_recent_skeleton_paths(
+            self._window_state.value("pose/recentSkeletonTemplates", [])
+        )
         #
         # Bump this when dock/toolbar layout changes to reset window state
         # for users upgrading from an older version.
-        SETTINGS_VERSION: int = 1
+        SETTINGS_VERSION: int = 2
         if self._window_state.value("settingsVersion", 0, type=int) != SETTINGS_VERSION:
             self._reset_layout()
             self._window_state.setValue("settingsVersion", SETTINGS_VERSION)
@@ -3744,6 +3824,20 @@ def _format_window_title(
     if dirty:
         title = f"{title}*"
     return title
+
+
+def _normalize_recent_skeleton_paths(value: object) -> list[str]:
+    if isinstance(value, str):
+        candidates = [value]
+    elif isinstance(value, list | tuple):
+        candidates = [item for item in value if isinstance(item, str)]
+    else:
+        return []
+    paths: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in paths:
+            paths.append(candidate)
+    return paths[:10]
 
 
 def _resolve_label_path(*, image_or_label_path: str, output_dir: Path | None) -> str:
