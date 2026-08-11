@@ -1833,7 +1833,7 @@ class Canvas(QtWidgets.QWidget):
     def wheelEvent(self, a0: QtGui.QWheelEvent) -> None:
         mods: Qt.KeyboardModifier = a0.modifiers()
         delta: QPoint = a0.angleDelta()
-        if mods == Qt.KeyboardModifier.ControlModifier:
+        if mods & Qt.KeyboardModifier.ControlModifier and delta.y() != 0:
             # with Ctrl/Command key
             # zoom
             self.zoom_request.emit(delta.y(), a0.position())
