@@ -38,6 +38,7 @@ from . import _config
 from . import _utils
 from ._frame_refinement import FrameInferenceWorker
 from ._frame_refinement import FramePrediction
+from ._frame_refinement import VideoInferenceWorker
 from ._frame_refinement import save_refined_frame
 from ._label_file import LABEL_FILE_SUFFIX
 from ._label_file import Annotation
@@ -76,7 +77,6 @@ from ._widgets import UniqueLabelQListWidget
 from ._widgets import ZoomWidget
 from ._widgets import download_ai_model
 from ._widgets import format_shape_label
-from ._yolo_predictions import shapes_from_yolo_result
 
 
 class _ZoomMode(enum.Enum):
@@ -286,11 +286,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self._custom_yolo_model: object | None = None
         self._custom_yolo_model_path: Path | None = None
         self._refine_thread: QtCore.QThread | None = None
-        self._refine_worker: FrameInferenceWorker | None = None
+        self._refine_worker: FrameInferenceWorker | VideoInferenceWorker | None = None
         self._refine_progress: QtWidgets.QProgressDialog | None = None
         self._refine_total_frames = 0
         self._refine_source_dir: Path | None = None
         self._refine_output_dir: Path | None = None
+        self._pending_video_path: Path | None = None
+        self._pending_video_output_dir: Path | None = None
+        self._pending_video_frame_indices: list[int] | None = None
+        self._pending_video_cache: tempfile.TemporaryDirectory[str] | None = None
         self._refinement_windows: list[QtWidgets.QWidget] = []
 
         self._setup_toolbars()
@@ -1598,6 +1602,13 @@ class MainWindow(QtWidgets.QMainWindow):
         thread.start()
 
     def _refine_from_video(self) -> None:
+        if self._refine_thread is not None:
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Refine From Video"),
+                self.tr("Frame inference is already running."),
+            )
+            return
         model_path = self._custom_yolo.model_path
         if not model_path.is_file():
             QtWidgets.QMessageBox.warning(
@@ -1653,25 +1664,107 @@ class MainWindow(QtWidgets.QMainWindow):
         if not accepted:
             return
 
+        frame_indices = list(range(0, frame_count, interval))
         output_dir = video_path.with_name(f"{video_path.stem}_refined_frames")
-        window = VideoSkimRefinementWindow(
+        cache = tempfile.TemporaryDirectory(prefix=f"{video_path.stem}-labelme-skim-")
+        progress = QtWidgets.QProgressDialog(
+            self.tr("Loading model…"),
+            self.tr("Cancel"),
+            0,
+            len(frame_indices),
+            self,
+        )
+        progress.setWindowTitle(self.tr("Labelling Video Frames"))
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        thread = QtCore.QThread(self)
+        worker = VideoInferenceWorker(
             video_path=video_path,
-            output_dir=output_dir,
-            frame_indices=list(range(0, frame_count, interval)),
+            frame_indices=frame_indices,
+            cache_dir=Path(cache.name),
             model_path=model_path,
             confidence=self._custom_yolo.confidence,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_refine_inference_progress)
+        worker.completed.connect(self._on_video_inference_completed)
+        worker.failed.connect(self._on_video_inference_failed)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        progress.canceled.connect(worker.cancel, Qt.ConnectionType.DirectConnection)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_refine_worker)
+
+        self._refine_thread = thread
+        self._refine_worker = worker
+        self._refine_progress = progress
+        self._refine_total_frames = len(frame_indices)
+        self._pending_video_path = video_path
+        self._pending_video_output_dir = output_dir
+        self._pending_video_frame_indices = frame_indices
+        self._pending_video_cache = cache
+        thread.start()
+
+    @QtCore.Slot(object)
+    def _on_video_inference_completed(self, value: object) -> None:
+        predictions = typing.cast(list[FramePrediction], value)
+        if self._refine_progress is not None:
+            self._refine_progress.close()
+        cache = self._pending_video_cache
+        if not predictions:
+            if cache is not None:
+                cache.cleanup()
+            self._clear_pending_video_inference()
+            self.show_status_message(self.tr("Video refinement was cancelled."), 5000)
+            return
+        assert self._pending_video_path is not None
+        assert self._pending_video_output_dir is not None
+        assert self._pending_video_frame_indices is not None
+        assert cache is not None
+        window = VideoSkimRefinementWindow(
+            video_path=self._pending_video_path,
+            output_dir=self._pending_video_output_dir,
+            frame_indices=self._pending_video_frame_indices,
+            predictions=predictions,
+            cache=cache,
             config_file=self._config_file,
             config_overrides=self._config_overrides,
         )
+        self._refinement_windows.append(window)
         window.destroyed.connect(
             lambda: self._refinement_windows.remove(window)
             if window in self._refinement_windows
             else None
         )
-        self._refinement_windows.append(window)
+        self._clear_pending_video_inference()
         window.show()
         window.raise_()
         window.activateWindow()
+
+    @QtCore.Slot(str)
+    def _on_video_inference_failed(self, details: str) -> None:
+        if self._refine_progress is not None:
+            self._refine_progress.close()
+        if self._pending_video_cache is not None:
+            self._pending_video_cache.cleanup()
+        self._clear_pending_video_inference()
+        logger.error("Video refinement inference failed:\n{}", details)
+        last_line = details.rstrip().splitlines()[-1] if details.strip() else details
+        QtWidgets.QMessageBox.critical(
+            self,
+            self.tr("Refine From Video Failed"),
+            last_line,
+        )
+
+    def _clear_pending_video_inference(self) -> None:
+        self._pending_video_path = None
+        self._pending_video_output_dir = None
+        self._pending_video_frame_indices = None
+        self._pending_video_cache = None
 
     @QtCore.Slot(int, str)
     def _on_refine_inference_progress(self, value: int, name: str) -> None:
@@ -4257,7 +4350,7 @@ class FrameRefinementWindow(MainWindow):
 
 
 class VideoSkimRefinementWindow(MainWindow):
-    """A separate editor for fast, lazy review of sampled video frames."""
+    """A separate editor for sampled video frames with predicted shapes."""
 
     def __init__(
         self,
@@ -4265,29 +4358,26 @@ class VideoSkimRefinementWindow(MainWindow):
         video_path: Path,
         output_dir: Path,
         frame_indices: list[int],
-        model_path: Path,
-        confidence: float,
+        predictions: list[FramePrediction],
+        cache: tempfile.TemporaryDirectory[str],
         config_file: Path | None,
         config_overrides: dict,
     ) -> None:
         if not frame_indices:
             raise ValueError("frame_indices must not be empty")
+        if len(predictions) != len(frame_indices):
+            raise ValueError("predictions must match frame_indices")
         self._video_path = video_path
         self._video_output_dir = output_dir
         self._video_frame_indices = frame_indices
-        self._video_model_path = model_path
-        self._video_confidence = confidence
+        self._video_predictions = predictions
         self._video_index = 0
         self._video_refining = False
         self._video_kept = 0
         self._video_skipped = 0
-        self._video_cache = tempfile.TemporaryDirectory(
-            prefix=f"{video_path.stem}-labelme-skim-"
-        )
+        self._video_cache = cache
         self._video_cache_dir = Path(self._video_cache.name)
         self._video_current_frame_path: Path | None = None
-        self._video_yolo_model: object | None = None
-        self._video_yolo_metadata: dict = {}
         super().__init__(
             config_file=config_file,
             config_overrides=config_overrides,
@@ -4341,7 +4431,7 @@ class VideoSkimRefinementWindow(MainWindow):
         FrameRefinementWindow._emphasize_refinement_button(self._video_refine_button)
         self._video_refine_button.setDefault(True)
         self._video_refine_button.setToolTip(
-            self.tr("Run prediction for this frame, edit it, and save the JSON")
+            self.tr("Edit this prediction and save the extracted frame and JSON")
         )
         self._video_refine_button.clicked.connect(self._refine_or_save_video_frame)
         layout.addWidget(self._video_refine_button)
@@ -4353,45 +4443,17 @@ class VideoSkimRefinementWindow(MainWindow):
         dock.setWidget(controls)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
 
-    def _extract_video_frame(self, frame_index: int) -> Path:
-        frame_path = (
-            self._video_cache_dir / f"{self._video_path.stem}-{frame_index:08d}.jpg"
-        )
-        if frame_path.exists():
-            return frame_path
-
-        import cv2
-
-        capture = cv2.VideoCapture(str(self._video_path))
-        try:
-            capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-            ok, frame = capture.read()
-        finally:
-            capture.release()
-        if not ok:
-            raise RuntimeError(
-                f"Could not read frame {frame_index} from {self._video_path}"
-            )
-        if not cv2.imwrite(str(frame_path), frame):
-            raise RuntimeError(f"Could not write extracted frame: {frame_path}")
-        return frame_path
-
     def _show_video_frame(self) -> None:
         frame_index = self._video_frame_indices[self._video_index]
-        try:
-            frame_path = self._extract_video_frame(frame_index)
-        except Exception as error:
-            QtWidgets.QMessageBox.critical(
-                self,
-                self.tr("Could Not Load Video Frame"),
-                str(error),
-            )
-            self._skip_video_frame()
-            return
+        prediction = self._video_predictions[self._video_index]
+        frame_path = prediction.image_path
         self._video_current_frame_path = frame_path
         self._load_file(str(frame_path))
         self._docks.label_list.clear()
         self._canvas_widgets.canvas.load_shapes(shapes=[], replace=True)
+        self._load_shapes(
+            shapes=[shape.copy() for shape in prediction.shapes], replace=True
+        )
         self.mark_clean()
         self._video_refining = False
         self._video_refine_button.setText(self.tr("REFINE"))
@@ -4408,7 +4470,7 @@ class VideoSkimRefinementWindow(MainWindow):
             )
         )
         self.show_status_message(
-            self.tr("Choose SKIP to keep skimming, or REFINE to run prediction."),
+            self.tr("Choose SKIP if the prediction is correct, or REFINE to edit it."),
             0,
         )
 
@@ -4420,8 +4482,6 @@ class VideoSkimRefinementWindow(MainWindow):
     @QtCore.Slot()
     def _refine_or_save_video_frame(self) -> None:
         if not self._video_refining:
-            if not self._load_video_prediction_for_current_frame():
-                return
             self._video_refining = True
             self._switch_canvas_mode(edit=True)
             self._video_refine_button.setText(self.tr("SAVE && NEXT"))
@@ -4439,48 +4499,6 @@ class VideoSkimRefinementWindow(MainWindow):
             return
         self._video_kept += 1
         self._advance_video_frame()
-
-    def _load_video_prediction_for_current_frame(self) -> bool:
-        assert self._video_current_frame_path is not None
-        try:
-            from ultralytics import YOLO
-
-            if self._video_yolo_model is None:
-                self._video_yolo_model = YOLO(str(self._video_model_path))
-                model_yaml = getattr(
-                    getattr(self._video_yolo_model, "model", None), "yaml", None
-                )
-                self._video_yolo_metadata = (
-                    model_yaml if isinstance(model_yaml, dict) else {}
-                )
-            model = typing.cast(typing.Any, self._video_yolo_model)
-            results = model.predict(
-                source=str(self._video_current_frame_path),
-                conf=self._video_confidence,
-                verbose=False,
-            )
-            if not results:
-                raise RuntimeError(
-                    f"Model returned no result for {self._video_current_frame_path}"
-                )
-            shapes = shapes_from_yolo_result(
-                results[0],
-                model_path=self._video_model_path,
-                model_metadata=self._video_yolo_metadata,
-            )
-        except Exception as error:
-            QtWidgets.QMessageBox.critical(
-                self,
-                self.tr("Could Not Refine Video Frame"),
-                str(error),
-            )
-            return False
-
-        self._docks.label_list.clear()
-        self._canvas_widgets.canvas.load_shapes(shapes=[], replace=True)
-        self._load_shapes(shapes=shapes, replace=True)
-        self.mark_clean()
-        return True
 
     def _save_current_video_frame(self) -> bool:
         assert self._video_current_frame_path is not None

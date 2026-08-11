@@ -78,6 +78,87 @@ class FrameInferenceWorker(QtCore.QObject):
             self.failed.emit(traceback.format_exc())
 
 
+class VideoInferenceWorker(QtCore.QObject):
+    progress = QtCore.Signal(int, str)
+    completed = QtCore.Signal(object)
+    failed = QtCore.Signal(str)
+
+    def __init__(
+        self,
+        *,
+        video_path: Path,
+        frame_indices: list[int],
+        cache_dir: Path,
+        model_path: Path,
+        confidence: float,
+    ) -> None:
+        super().__init__()
+        self._video_path = video_path
+        self._frame_indices = frame_indices
+        self._cache_dir = cache_dir
+        self._model_path = model_path
+        self._confidence = confidence
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    @QtCore.Slot()
+    def run(self) -> None:
+        capture = None
+        try:
+            import cv2
+            from ultralytics import YOLO
+
+            model = YOLO(str(self._model_path))
+            model_yaml = getattr(getattr(model, "model", None), "yaml", None)
+            metadata = model_yaml if isinstance(model_yaml, dict) else {}
+            capture = cv2.VideoCapture(str(self._video_path))
+            if not capture.isOpened():
+                raise RuntimeError(f"Could not open video: {self._video_path}")
+
+            predictions: list[FramePrediction] = []
+            for sample_number, frame_index in enumerate(self._frame_indices, start=1):
+                if self._cancelled:
+                    self.completed.emit([])
+                    return
+                capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                ok, frame = capture.read()
+                if not ok:
+                    raise RuntimeError(
+                        f"Could not read frame {frame_index} from {self._video_path}"
+                    )
+                frame_path = (
+                    self._cache_dir / f"{self._video_path.stem}-{frame_index:08d}.jpg"
+                )
+                if not cv2.imwrite(str(frame_path), frame):
+                    raise RuntimeError(f"Could not write extracted frame: {frame_path}")
+                results = model.predict(
+                    source=str(frame_path),
+                    conf=self._confidence,
+                    verbose=False,
+                )
+                if not results:
+                    raise RuntimeError(f"Model returned no result for {frame_path}")
+                predictions.append(
+                    FramePrediction(
+                        image_path=frame_path,
+                        shapes=shapes_from_yolo_result(
+                            results[0],
+                            model_path=self._model_path,
+                            model_metadata=metadata,
+                        ),
+                    )
+                )
+                self.progress.emit(sample_number, f"frame {frame_index + 1}")
+            self.completed.emit(predictions)
+        except Exception:
+            self.failed.emit(traceback.format_exc())
+        finally:
+            if capture is not None:
+                capture.release()
+
+
 def save_refined_frame(
     *,
     source_root: Path,

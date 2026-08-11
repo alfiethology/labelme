@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 
 from PIL import Image
 from PySide6 import QtCore
 from PySide6 import QtWidgets
-from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 
 from labelme._app import FrameRefinementWindow
@@ -184,29 +184,40 @@ def test_video_skim_refinement_saves_only_refined_sampled_frames(
     qapp: QtWidgets.QApplication,
     qtbot: QtBot,
     tmp_path: Path,
-    monkeypatch: MonkeyPatch,
 ) -> None:
     video_path = tmp_path / "clip.avi"
     output_dir = tmp_path / "clip_refined_frames"
     _write_test_video(video_path)
+    cache = tempfile.TemporaryDirectory(dir=tmp_path)
+    cache_dir = Path(cache.name)
+    first = cache_dir / "clip-00000000.jpg"
+    second = cache_dir / "clip-00000001.jpg"
+    Image.new("RGB", (40, 30), "white").save(first)
+    Image.new("RGB", (40, 30), "black").save(second)
+    shape = Shape(
+        label="rat",
+        shape_type="rectangle",
+        points=[[2, 3], [20, 25]],
+        closed=True,
+    )
     window = VideoSkimRefinementWindow(
         video_path=video_path,
         output_dir=output_dir,
         frame_indices=[0, 1],
-        model_path=Path("model.pt"),
-        confidence=0.25,
+        predictions=[
+            FramePrediction(image_path=first, shapes=[shape]),
+            FramePrediction(image_path=second, shapes=[shape]),
+        ],
+        cache=cache,
         config_file=None,
         config_overrides={},
     )
-    monkeypatch.setattr(
-        window,
-        "_load_video_prediction_for_current_frame",
-        lambda: True,
-    )
     window.show()
 
+    assert len(window._canvas_widgets.canvas.shapes) == 1
     qtbot.mouseClick(window._video_skip_button, QtCore.Qt.MouseButton.LeftButton)
     assert window._video_index == 1
+    assert len(window._canvas_widgets.canvas.shapes) == 1
 
     qtbot.mouseClick(window._video_refine_button, QtCore.Qt.MouseButton.LeftButton)
     QtCore.QTimer.singleShot(0, lambda: dismiss_active_modal(qtbot=qtbot))
