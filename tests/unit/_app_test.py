@@ -112,6 +112,22 @@ def test_format_window_title(
     )
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("rat.skeleton.json", ["rat.skeleton.json"]),
+        (
+            ["rat.skeleton.json", "mouse.skeleton.json", "rat.skeleton.json"],
+            ["rat.skeleton.json", "mouse.skeleton.json"],
+        ),
+        (["rat.skeleton.json", 123, None], ["rat.skeleton.json"]),
+        (None, []),
+    ],
+)
+def test_normalize_recent_skeleton_paths(value: object, expected: list[str]) -> None:
+    assert _app._normalize_recent_skeleton_paths(value) == expected
+
+
 def _make_png_bytes(
     *,
     width: int,

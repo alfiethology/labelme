@@ -12,6 +12,9 @@ from PySide6 import QtCore
 from PySide6 import QtGui
 
 from .. import _utils
+from .._pose import POSE_DATA_KEY
+from .._pose import skeleton_shape_parts
+from .._shape import ROTATION_HANDLE_OFFSET_PX
 from .._shape import Shape
 from .._shape import get_rotation_handle
 from .._shape import nearest_edge_index
@@ -159,6 +162,9 @@ class _ShapePaths:
     negative_vertices: QtGui.QPainterPath = dataclasses.field(
         default_factory=QtGui.QPainterPath
     )
+    missing_vertices: QtGui.QPainterPath = dataclasses.field(
+        default_factory=QtGui.QPainterPath
+    )
     rotation_vertices: QtGui.QPainterPath = dataclasses.field(
         default_factory=QtGui.QPainterPath
     )
@@ -189,7 +195,13 @@ def _paint_shape_points(
         highlighted=context.rotation_highlight is not None,
         palette=palette,
     )
-    if context.fill and shape.shape_type not in ["line", "linestrip", "points", "mask"]:
+    if context.fill and shape.shape_type not in [
+        "line",
+        "linestrip",
+        "points",
+        "skeleton",
+        "mask",
+    ]:
         fill = palette.select_fill if context.selected else palette.fill
         painter.fillPath(paths.line, fill)
     if paths.orientation_arrow.length() > 0:
@@ -205,6 +217,12 @@ def _paint_shape_points(
         painter.setPen(neg_pen)
         painter.drawPath(paths.negative_vertices)
         painter.fillPath(paths.negative_vertices, neg_color)
+
+    if paths.missing_vertices.length() > 0:
+        missing_pen = QtGui.QPen(QtGui.QColor(128, 128, 128, 220))
+        missing_pen.setWidth(PEN_WIDTH)
+        painter.setPen(missing_pen)
+        painter.drawPath(paths.missing_vertices)
 
 
 def _paint_filled_vertices(
@@ -263,7 +281,12 @@ def _build_shape_rotation_point_path(
         default_size=context.point_size,
         default_point_type=context.point_type,
     )
-    handle = get_rotation_handle(shape=shape, index=vertex_index)
+    offset = (
+        ROTATION_HANDLE_OFFSET_PX / context.scale
+        if shape.shape_type == "skeleton"
+        else 0.0
+    )
+    handle = get_rotation_handle(shape=shape, index=vertex_index, offset=offset)
     pos = QtCore.QPointF(*(handle * context.scale))
     _draw_vertex(path=path, pos=pos, size=size, point_type=point_type)
 
@@ -282,6 +305,17 @@ def _draw_vertex(
         path.addEllipse(pos, half, half)
     else:
         raise ValueError(f"Unsupported vertex shape: {point_type}")
+
+
+def _draw_missing_vertex(
+    *, path: QtGui.QPainterPath, pos: QtCore.QPointF, size: float
+) -> None:
+    half = size / 2.0
+    path.addEllipse(pos, half, half)
+    path.moveTo(pos.x() - half, pos.y() - half)
+    path.lineTo(pos.x() + half, pos.y() + half)
+    path.moveTo(pos.x() + half, pos.y() - half)
+    path.lineTo(pos.x() - half, pos.y() + half)
 
 
 def _build_shape_oriented_rectangle_arrow_path(
@@ -368,6 +402,88 @@ def _build_shape_points_paths(
             _build_shape_point_path(
                 path=path, shape=shape, context=context, vertex_index=i
             )
+    elif shape.shape_type == "skeleton":
+        try:
+            bbox, keypoints = skeleton_shape_parts(shape=shape)
+        except ValueError:
+            return paths
+        bbox_count = len(bbox)
+        if bbox_count == 2:
+            paths.line.addRect(
+                QtCore.QRectF(
+                    QtCore.QPointF(*(bbox[0] * scale)),
+                    QtCore.QPointF(*(bbox[1] * scale)),
+                )
+            )
+        else:
+            paths.line.moveTo(QtCore.QPointF(*(bbox[0] * scale)))
+            for point in bbox[1:]:
+                paths.line.lineTo(QtCore.QPointF(*(point * scale)))
+            paths.line.lineTo(QtCore.QPointF(*(bbox[0] * scale)))
+            edge_midpoint = (bbox[0] + bbox[1]) / 2
+            handle = get_rotation_handle(
+                shape=shape,
+                index=0,
+                offset=ROTATION_HANDLE_OFFSET_PX / scale,
+            )
+            paths.line.moveTo(QtCore.QPointF(*(edge_midpoint * scale)))
+            paths.line.lineTo(QtCore.QPointF(*(handle * scale)))
+            _build_shape_rotation_point_path(
+                path=paths.rotation_vertices,
+                shape=shape,
+                context=context,
+                vertex_index=0,
+            )
+        pose_data = shape.other_data.get(POSE_DATA_KEY, {})
+        edges = pose_data.get("edges", []) if isinstance(pose_data, dict) else []
+        visibility = (
+            pose_data.get("visibility", []) if isinstance(pose_data, dict) else []
+        )
+        for edge in edges:
+            if not (
+                isinstance(edge, list)
+                and len(edge) == 2
+                and all(isinstance(i, int) for i in edge)
+                and all(0 <= i < len(keypoints) for i in edge)
+            ):
+                continue
+            start, end = edge
+            if len(visibility) == len(keypoints) and (
+                visibility[start] == 0 or visibility[end] == 0
+            ):
+                continue
+            paths.line.moveTo(QtCore.QPointF(*(keypoints[start] * scale)))
+            paths.line.lineTo(QtCore.QPointF(*(keypoints[end] * scale)))
+        for i in range(bbox_count):
+            _build_shape_point_path(
+                path=paths.vertices, shape=shape, context=context, vertex_index=i
+            )
+        for i in range(len(keypoints)):
+            vertex_index = i + bbox_count
+            if len(visibility) == len(keypoints) and visibility[i] == 0:
+                size, _ = _resolve_vertex_style(
+                    highlight=context.highlight,
+                    vertex_index=vertex_index,
+                    default_size=context.point_size,
+                    default_point_type=context.point_type,
+                )
+                _draw_missing_vertex(
+                    path=paths.missing_vertices,
+                    pos=QtCore.QPointF(*(shape.points[vertex_index] * scale)),
+                    size=size,
+                )
+                continue
+            vertex_path = (
+                paths.negative_vertices
+                if len(visibility) == len(keypoints) and visibility[i] == 1
+                else paths.vertices
+            )
+            _build_shape_point_path(
+                path=vertex_path,
+                shape=shape,
+                context=context,
+                vertex_index=vertex_index,
+            )
     else:
         paths.line.moveTo(QtCore.QPointF(*(points[0] * scale)))
         for i in range(len(points)):
@@ -399,6 +515,8 @@ def is_hit_by_point(
         if len(shape.points) == 0:
             return False
         return bool(np.linalg.norm((point - shape.points[0]) * scale) <= point_size / 2)
+    if shape.shape_type == "skeleton":
+        return _build_image_path(shape=shape).contains(QtCore.QPointF(*point))
     if shape.mask is not None:
         raw_y = int(round(float(point[1]) - float(shape.points[0][1])))
         raw_x = int(round(float(point[0]) - float(shape.points[0][0])))
@@ -425,6 +543,20 @@ def _build_image_path(*, shape: Shape) -> QtGui.QPainterPath:
             out.addRect(
                 QtCore.QRectF(QtCore.QPointF(*points[0]), QtCore.QPointF(*points[1]))
             )
+    elif shape.shape_type == "skeleton":
+        try:
+            bbox, _ = skeleton_shape_parts(shape=shape)
+        except ValueError:
+            return out
+        if len(bbox) == 2:
+            out.addRect(
+                QtCore.QRectF(QtCore.QPointF(*bbox[0]), QtCore.QPointF(*bbox[1]))
+            )
+        else:
+            out.moveTo(QtCore.QPointF(*bbox[0]))
+            for point in bbox[1:]:
+                out.lineTo(QtCore.QPointF(*point))
+            out.closeSubpath()
     elif shape.shape_type == "circle":
         if len(points) == 2:
             radius = float(np.linalg.norm(points[0] - points[1]))

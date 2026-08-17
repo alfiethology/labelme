@@ -14,6 +14,8 @@ from PySide6.QtCore import QSize
 from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
+from labelme._pose import SkeletonTemplate
+from labelme._pose import make_skeleton_shape
 from labelme._shape import Shape
 from labelme._shape import ShapeType
 from labelme._widgets.canvas import Canvas
@@ -44,12 +46,171 @@ def canvas(qtbot: QtBot) -> Canvas:
     return canvas
 
 
+@pytest.mark.gui
+def test_interactive_skeleton_drawing_adds_names_and_edges(canvas: Canvas) -> None:
+    canvas.start_skeleton_drawing()
+    canvas.add_skeleton_node(name="snout", point=QPointF(10, 10))
+    canvas.add_skeleton_node(name="neck_base", point=QPointF(40, 20))
+    canvas.set_skeleton_drawing_mode("edges")
+
+    canvas._select_skeleton_edge_endpoint(pos=QPointF(10, 10))
+    canvas._select_skeleton_edge_endpoint(pos=QPointF(40, 20))
+
+    drawing = canvas.skeleton_drawing()
+    assert drawing.names == ("snout", "neck_base")
+    assert [(point.x(), point.y()) for point in drawing.points] == [
+        (10.0, 10.0),
+        (40.0, 20.0),
+    ]
+    assert drawing.edges == ((0, 1),)
+
+
+@pytest.mark.gui
+def test_interactive_skeleton_clicking_existing_bone_toggles_it(
+    canvas: Canvas,
+) -> None:
+    canvas.start_skeleton_drawing()
+    canvas.add_skeleton_node(name="snout", point=QPointF(10, 10))
+    canvas.add_skeleton_node(name="neck_base", point=QPointF(40, 20))
+    canvas.set_skeleton_drawing_mode("edges")
+    for _ in range(2):
+        canvas._select_skeleton_edge_endpoint(pos=QPointF(10, 10))
+        canvas._select_skeleton_edge_endpoint(pos=QPointF(40, 20))
+
+    assert canvas.skeleton_drawing().edges == ()
+
+
+@pytest.mark.gui
+def test_interactive_skeleton_rejects_duplicate_node_name(canvas: Canvas) -> None:
+    canvas.start_skeleton_drawing()
+    canvas.add_skeleton_node(name="snout", point=QPointF(10, 10))
+
+    with pytest.raises(ValueError, match="already exists"):
+        canvas.add_skeleton_node(name="snout", point=QPointF(20, 20))
+
+
+@pytest.mark.gui
+def test_take_interactive_skeleton_clears_drawing_state(canvas: Canvas) -> None:
+    canvas.start_skeleton_drawing()
+    canvas.add_skeleton_node(name="snout", point=QPointF(10, 10))
+
+    drawing = canvas.take_skeleton_drawing()
+
+    assert drawing.names == ("snout",)
+    assert canvas.is_drawing_skeleton is False
+
+
+@pytest.mark.gui
+def test_cancel_interactive_skeleton_emits_signal(canvas: Canvas) -> None:
+    cancelled = Mock()
+    canvas.skeleton_drawing_cancelled.connect(cancelled)
+    canvas.start_skeleton_drawing()
+
+    canvas.cancel_skeleton_drawing()
+
+    cancelled.assert_called_once_with()
+
+
 def _make_oriented_rectangle(corners: list[tuple[float, float]]) -> Shape:
     return Shape(
         shape_type="oriented_rectangle",
         points=np.array(corners, dtype=np.float64),
         closed=True,
     )
+
+
+def _make_skeleton() -> Shape:
+    return make_skeleton_shape(
+        skeleton=SkeletonTemplate(
+            label="rat",
+            keypoints=("snout", "tail_base"),
+            edges=((0, 1),),
+            positions=np.array([(0.75, 0.25), (0.25, 0.75)]),
+            flip_idx=(0, 1),
+        ),
+        bounds=(10, 10, 70, 40),
+    )
+
+
+@pytest.mark.gui
+def test_bounded_move_skeleton_corner_stretches_all_keypoints(
+    canvas: Canvas,
+) -> None:
+    shape = _make_skeleton()
+
+    canvas._bounded_move_vertex(
+        shape=shape, vertex_index=2, pos=QPointF(90, 45), is_shift_pressed=False
+    )
+
+    np.testing.assert_allclose(
+        shape.points[:4], [(10, 10), (90, 10), (90, 45), (10, 45)]
+    )
+    np.testing.assert_allclose(shape.points[4:], [(70, 18.75), (30, 36.25)])
+
+
+@pytest.mark.gui
+def test_drag_skeleton_rotation_handle_rotates_box_and_keypoints(
+    canvas: Canvas,
+) -> None:
+    shape = _make_skeleton()
+    original = shape.points.copy()
+    canvas.load_shapes(shapes=[shape])
+    canvas.hovered_shape = shape
+    canvas._hovered_rotation = 0
+    canvas._capture_rotation_anchors()
+
+    center = np.array([40.0, 25.0])
+    initial_handle = np.array([40.0, -14.0])
+    quarter_turn_handle = center + np.array(
+        [-(initial_handle - center)[1], initial_handle[0] - center[0]]
+    )
+    canvas._drag_hovered_rotation_point(pos=QPointF(*quarter_turn_handle))
+
+    expected = center + np.column_stack(
+        (-(original - center)[:, 1], (original - center)[:, 0])
+    )
+    np.testing.assert_allclose(shape.points, expected, atol=1e-12)
+
+
+@pytest.mark.gui
+def test_hovered_skeleton_keypoint_excludes_transform_box(canvas: Canvas) -> None:
+    shape = _make_skeleton()
+    canvas.load_shapes(shapes=[shape])
+    canvas.hovered_shape = shape
+
+    canvas._hovered_vertex = 0
+    assert canvas._hovered_skeleton_keypoint() is None
+
+    canvas._hovered_vertex = 5
+    assert canvas._hovered_skeleton_keypoint() == (shape, 1)
+
+
+@pytest.mark.gui
+def test_set_skeleton_keypoint_visibility_changes_only_requested_point(
+    canvas: Canvas,
+) -> None:
+    shape = _make_skeleton()
+
+    changed = canvas._set_skeleton_keypoint_visibility(
+        shape=shape, keypoint_index=0, state=1
+    )
+
+    assert changed is True
+    assert shape.other_data["pose"]["visibility"] == [1, 2]
+
+
+@pytest.mark.gui
+def test_set_skeleton_keypoint_visibility_ignores_unchanged_state(
+    canvas: Canvas,
+) -> None:
+    shape = _make_skeleton()
+
+    changed = canvas._set_skeleton_keypoint_visibility(
+        shape=shape, keypoint_index=0, state=2
+    )
+
+    assert changed is False
+    assert shape.other_data["pose"]["visibility"] == [2, 2]
 
 
 @pytest.mark.gui

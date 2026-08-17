@@ -65,11 +65,19 @@ def _diff_rows(a: QtGui.QImage, b: QtGui.QImage, *, bottom: int) -> int:
 
 
 def _shape(shape_type: ShapeType, points: list[list[float]]) -> Shape:
-    return Shape(
+    shape = Shape(
         label="a",
         shape_type=shape_type,
         points=np.array(points, dtype=np.float64),
     )
+    if shape_type == "skeleton" and len(points) >= 4:
+        keypoint_count = len(points) - 4
+        shape.other_data["pose"] = {
+            "keypoints": [f"point_{i}" for i in range(keypoint_count)],
+            "edges": [],
+            "visibility": [2] * keypoint_count,
+        }
+    return shape
 
 
 @pytest.mark.parametrize(
@@ -83,6 +91,11 @@ def _shape(shape_type: ShapeType, points: list[list[float]]) -> Shape:
             "oriented_rectangle",
             [[0, 0], [10, 0], [10, 5], [0, 5]],
             (0.0, 0.0, 10.0, 5.0),
+        ),
+        (
+            "skeleton",
+            [[10, 10], [50, 10], [50, 30], [10, 30], [20, 15], [40, 25]],
+            (10.0, 10.0, 40.0, 20.0),
         ),
         ("polygon", [[0, 0], [10, 0], [10, 5], [0, 5]], (0.0, 0.0, 10.0, 5.0)),
         # A single point bounds to a zero-size rect at its own location.
@@ -107,6 +120,7 @@ def test_bounds_spans_the_shape(
         ("mask", [[5, 5]]),
         ("circle", [[5, 5]]),
         ("oriented_rectangle", [[0, 0], [10, 0], [10, 5]]),
+        ("skeleton", [[5, 5]]),
         ("polygon", []),
     ],
 )
