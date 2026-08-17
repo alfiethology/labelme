@@ -159,6 +159,46 @@ labelme data_annotated/  # Open directory to annotate all images in it
 labelme data_annotated/ --labels labels.txt  # specify label list with a file
 ```
 
+### Draw and save a skeleton
+
+A skeleton is a set of named points, such as `nose`, `left_eye`, and
+`right_knee`, joined by lines called bones.
+
+1. Open an image, then choose **Pose > Draw Skeleton…**.
+1. Enter the kind of animal you are marking, such as `dog` or `hen`.
+1. Leave **Place Nodes** selected. Click each body point and give it a short,
+   unique name. The order you add the points is also their order in a YOLO pose
+   export.
+1. Select **Connect Nodes**. Click one point and then another to draw a bone
+   between them. Repeat for the other bones.
+1. Select **Finish Skeleton**, or press Enter or Space. The mirror-pairs box is
+   optional: leave it empty if you do not need it. Otherwise, enter pairs such
+   as `left_eye,right_eye`, one pair per line.
+1. Adjust the finished skeleton if needed. Drag a point to move just that
+   point, drag a box corner to resize the whole skeleton, or drag the round
+   handle above the box to rotate it.
+1. Save the annotation with **File > Save** (Ctrl+S). Auto Save is on by
+   default, so Labelme will normally save it as soon as you finish drawing.
+
+The finished skeleton is stored in the normal annotation file for that image.
+For example, a skeleton drawn on `hen.jpg` is normally saved in `hen.json` next
+to the image. If you chose a different annotation directory with
+**File > Change Output Directory** or `--output`, the JSON file is saved there
+instead.
+
+The annotation file and a skeleton template are different:
+
+- `hen.json` stores the skeleton you placed on one particular image.
+- A file ending in `.skeleton.json` is a reusable blank layout. To make one,
+  select a finished skeleton and choose
+  **Pose > Save Selected Skeleton As Template…**. On another image, use
+  **Pose > Place Skeleton From File…**, then move its points onto the new
+  animal.
+
+To mark a point as visible, hidden, or missing, right-click it. For more detail,
+including how to export a YOLO pose dataset, see
+[Animal pose annotation](docs/pose-estimation.md).
+
 ### Command Line Arguments
 
 - `--output` specifies the location that annotations will be written to. If the location ends with .json, a single annotation will be written to this file. Only one image can be annotated if a location is specified with .json. If the location does not end with .json, the program will assume it is a directory. Annotations will be stored in this directory with a name that corresponds to the image that the annotation was made on.
