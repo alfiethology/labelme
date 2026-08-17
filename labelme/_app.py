@@ -72,6 +72,12 @@ class _ZoomMode(enum.Enum):
     MANUAL_ZOOM = enum.auto()
 
 
+_DEFAULT_ZOOM_SPEED: Final[int] = 2
+_ZOOM_SPEEDS: Final[tuple[int, ...]] = (1, 2, 3, 4)
+_ZOOM_STEP_PER_SPEED: Final[float] = 0.1
+_WHEEL_DELTA_PER_STEP: Final[int] = 120
+
+
 _TextToAnnotationCreateMode: TypeAlias = Literal["polygon", "rectangle"]
 _AI_CREATE_MODES: tuple[str, ...] = (
     "ai_points_to_shape",
@@ -142,6 +148,7 @@ class _Actions(NamedTuple):
     zoom_in: QtGui.QAction
     zoom_out: QtGui.QAction
     zoom_org: QtGui.QAction
+    zoom_speed_menu: QtWidgets.QMenu
     reset_layout: QtGui.QAction
     fill_drawing: QtGui.QAction
     fill_editing: QtGui.QAction
@@ -156,7 +163,7 @@ class _Actions(NamedTuple):
     on_load_active: tuple[QtGui.QAction, ...]
     on_shapes_present: tuple[QtGui.QAction, ...]
     context_menu: tuple[QtGui.QAction, ...]
-    edit_menu: tuple[QtGui.QAction | None, ...]
+    edit_menu: tuple[QtGui.QAction | QtWidgets.QMenu | None, ...]
 
 
 class _Menus(NamedTuple):
@@ -224,6 +231,7 @@ class MainWindow(QtWidgets.QMainWindow):
             tuple[str, dict[str, bool], int | None, str] | None
         ) = None
         self._runtime_label_colors: dict[str, tuple[int, int, int]] = {}
+        self._zoom_speed = _DEFAULT_ZOOM_SPEED
         self._docks = self._setup_dock_widgets()
 
         self.setAcceptDrops(True)
@@ -620,7 +628,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         zoom_in = action(
             self.tr("Zoom &In"),
-            lambda _: self._add_zoom(increment=1.1),
+            lambda _: self._zoom_by_steps(1),
             shortcuts["zoom_in"],
             icon="phosphor/magnifying-glass-plus.svg",
             tip=self.tr("Increase zoom level"),
@@ -628,7 +636,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         zoom_out = action(
             self.tr("&Zoom Out"),
-            lambda _: self._add_zoom(increment=0.9),
+            lambda _: self._zoom_by_steps(-1),
             shortcuts["zoom_out"],
             icon="phosphor/magnifying-glass-minus.svg",
             tip=self.tr("Decrease zoom level"),
@@ -642,6 +650,20 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Zoom to original size"),
             enabled=False,
         )
+        zoom_speed_menu = QtWidgets.QMenu(self.tr("Zoom Speed"), self)
+        zoom_speed_group = QtGui.QActionGroup(zoom_speed_menu)
+        zoom_speed_group.setExclusive(True)
+        for speed in _ZOOM_SPEEDS:
+            speed_action = action(
+                text=self.tr("{speed}×").format(speed=speed),
+                slot=lambda checked, speed=speed: (
+                    self._set_zoom_speed(speed) if checked else None
+                ),
+                checkable=True,
+                checked=speed == self._zoom_speed,
+            )
+            zoom_speed_group.addAction(speed_action)
+            zoom_speed_menu.addAction(speed_action)
         reset_layout = action(
             text=self.tr("Reset Layout"),
             slot=self._reset_layout,
@@ -789,6 +811,7 @@ class MainWindow(QtWidgets.QMainWindow):
             remove_point,
             None,
             keep_prev_action,
+            zoom_speed_menu,
         )
         return _Actions(
             about=about,
@@ -830,6 +853,7 @@ class MainWindow(QtWidgets.QMainWindow):
             zoom_in=zoom_in,
             zoom_out=zoom_out,
             zoom_org=zoom_org,
+            zoom_speed_menu=zoom_speed_menu,
             reset_layout=reset_layout,
             fill_drawing=fill_drawing,
             fill_editing=fill_editing,
@@ -2322,7 +2346,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_zoom(value=zoom_value, pos=pos)
 
     def _zoom_requested(self, delta: int, pos: QtCore.QPointF) -> None:
-        self._add_zoom(increment=1.1 if delta > 0 else 0.9, pos=pos)
+        if delta == 0:
+            return
+        self._zoom_by_steps(delta / _WHEEL_DELTA_PER_STEP, pos=pos)
+
+    def _zoom_by_steps(self, steps: float, pos: QtCore.QPointF | None = None) -> None:
+        step_factor = 1 + _ZOOM_STEP_PER_SPEED * self._zoom_speed
+        self._add_zoom(increment=step_factor**steps, pos=pos)
+
+    def _set_zoom_speed(self, speed: int) -> None:
+        if speed not in _ZOOM_SPEEDS:
+            raise ValueError(f"Unsupported zoom speed: {speed}")
+        self._zoom_speed = speed
 
     def set_fit_window_mode(self, value: bool = True) -> None:
         target = _ZoomMode.FIT_WINDOW if value else _ZoomMode.MANUAL_ZOOM

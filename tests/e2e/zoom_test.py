@@ -96,6 +96,46 @@ def test_zoom_step_keeps_fractional_precision(
     close_or_pause(qtbot=qtbot, widget=_win, pause=pause)
 
 
+@pytest.mark.gui
+def test_zoom_speed_defaults_to_two_and_is_selectable(
+    qtbot: QtBot,
+    _win: MainWindow,
+    pause: bool,
+) -> None:
+    zoom_speed_menu = _win._actions.zoom_speed_menu
+    speed_actions = {action.text(): action for action in zoom_speed_menu.actions()}
+
+    assert zoom_speed_menu.menuAction() in _win._menus.edit.actions()
+    assert _win._zoom_speed == 2
+    assert speed_actions["2×"].isChecked()
+
+    speed_actions["4×"].trigger()
+
+    assert _win._zoom_speed == 4
+    assert speed_actions["4×"].isChecked()
+    assert not speed_actions["2×"].isChecked()
+
+    close_or_pause(qtbot=qtbot, widget=_win, pause=pause)
+
+
+@pytest.mark.gui
+def test_wheel_zoom_is_proportional_and_symmetric(
+    qtbot: QtBot,
+    _win: MainWindow,
+    pause: bool,
+) -> None:
+    _win._canvas_widgets.zoom_widget.setValue(100)
+    pos = QPointF(0, 0)
+
+    _win._zoom_requested(120, pos)
+    assert _win._canvas_widgets.zoom_widget.value() == pytest.approx(120)
+
+    _win._zoom_requested(-120, pos)
+    assert _win._canvas_widgets.zoom_widget.value() == pytest.approx(100)
+
+    close_or_pause(qtbot=qtbot, widget=_win, pause=pause)
+
+
 def _make_wheel_event(
     pos: QPointF,
     angle_delta: QPoint,
@@ -125,6 +165,13 @@ def _make_wheel_event(
             "zoom_request",
             None,
             id="ctrl_zoom",
+        ),
+        pytest.param(
+            Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier,
+            QPoint(0, 120),
+            "zoom_request",
+            None,
+            id="ctrl_shift_zoom",
         ),
         pytest.param(
             Qt.KeyboardModifier.NoModifier,
@@ -176,5 +223,28 @@ def test_canvas_wheel_event_dispatches_signal(
             f"{signal_attr} expected exactly one non-zero emission, got {non_zero!r}"
         )
         assert non_zero[0] == (angle_delta.y(), expected_orientation)
+
+    close_or_pause(qtbot=qtbot, widget=_win, pause=pause)
+
+
+@pytest.mark.gui
+def test_ctrl_horizontal_wheel_does_not_zoom(
+    qtbot: QtBot,
+    _win: MainWindow,
+    pause: bool,
+) -> None:
+    canvas = _win._canvas_widgets.canvas
+    captured: list[tuple[object, ...]] = []
+    canvas.zoom_request.connect(lambda *args: captured.append(args))
+
+    canvas.wheelEvent(
+        _make_wheel_event(
+            pos=QPointF(canvas.width() / 2, canvas.height() / 2),
+            angle_delta=QPoint(120, 0),
+            modifiers=Qt.KeyboardModifier.ControlModifier,
+        )
+    )
+
+    assert captured == []
 
     close_or_pause(qtbot=qtbot, widget=_win, pause=pause)
