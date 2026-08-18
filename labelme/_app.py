@@ -4155,7 +4155,6 @@ class FrameRefinementWindow(MainWindow):
         self._frame_output_dir = output_dir
         self._frame_model_path = model_path
         self._frame_index = 0
-        self._frame_refining = False
         self._frame_kept = 0
         self._frame_skipped = 0
         super().__init__(
@@ -4207,14 +4206,14 @@ class FrameRefinementWindow(MainWindow):
         self._leave_refinement_button.clicked.connect(self._leave_refinement_early)
         layout.addWidget(self._leave_refinement_button)
 
-        self._refine_frame_button = QtWidgets.QPushButton(self.tr("REFINE"))
+        self._refine_frame_button = QtWidgets.QPushButton(self.tr("SAVE AND NEXT"))
         self._refine_frame_button.setMinimumSize(220, 64)
         self._emphasize_refinement_button(self._refine_frame_button)
         self._refine_frame_button.setDefault(True)
         self._refine_frame_button.setToolTip(
             self.tr("Edit this prediction and retain the corrected frame")
         )
-        self._refine_frame_button.clicked.connect(self._refine_or_save_frame)
+        self._refine_frame_button.clicked.connect(self._save_and_next_frame)
         layout.addWidget(self._refine_frame_button)
 
         dock = QtWidgets.QDockWidget(self.tr("Frame Review"), self)
@@ -4251,8 +4250,7 @@ class FrameRefinementWindow(MainWindow):
             shapes=[shape.copy() for shape in prediction.shapes], replace=True
         )
         self.mark_clean()
-        self._frame_refining = False
-        self._refine_frame_button.setText(self.tr("REFINE"))
+        self._switch_canvas_mode(edit=True)
         self._frame_progress_label.setText(
             self.tr(
                 "Frame {current}/{total}  •  kept {kept}  •  skipped {skipped}"
@@ -4264,9 +4262,13 @@ class FrameRefinementWindow(MainWindow):
             )
         )
         self.show_status_message(
-            self.tr("Choose SKIP if the prediction is correct, or REFINE to edit it."),
+            self.tr(
+                "Edit, add, or delete shapes, then choose SAVE AND NEXT. "
+                "Choose SKIP if the prediction is already correct."
+            ),
             0,
         )
+        self._canvas_widgets.canvas.setFocus()
 
     @QtCore.Slot()
     def _skip_refinement_frame(self) -> None:
@@ -4274,21 +4276,7 @@ class FrameRefinementWindow(MainWindow):
         self._advance_refinement_frame()
 
     @QtCore.Slot()
-    def _refine_or_save_frame(self) -> None:
-        if not self._frame_refining:
-            self._frame_refining = True
-            self._switch_canvas_mode(edit=True)
-            self._refine_frame_button.setText(self.tr("SAVE && NEXT"))
-            self.show_status_message(
-                self.tr(
-                    "Edit, add, or delete shapes, then choose SAVE & NEXT. "
-                    "The JSON annotation will be saved beside the source frame."
-                ),
-                0,
-            )
-            self._canvas_widgets.canvas.setFocus()
-            return
-
+    def _save_and_next_frame(self) -> None:
         if not self._save_current_refinement_frame():
             return
         self._frame_kept += 1
@@ -4317,7 +4305,7 @@ class FrameRefinementWindow(MainWindow):
 
     @QtCore.Slot()
     def _leave_refinement_early(self) -> None:
-        if self._frame_refining:
+        if self._is_changed:
             choice = QtWidgets.QMessageBox.question(
                 self,
                 self.tr("Leave Frame Refinement?"),

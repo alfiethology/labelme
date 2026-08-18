@@ -117,14 +117,11 @@ def test_frame_refinement_skips_easy_frame_and_saves_refined_frame(
     assert window._leave_refinement_button.font().pointSize() >= 18
     assert window._refine_frame_button.font().bold()
     assert window._refine_frame_button.font().pointSize() >= 18
+    assert window._refine_frame_button.text() == "SAVE AND NEXT"
 
     qtbot.mouseClick(window._skip_frame_button, QtCore.Qt.MouseButton.LeftButton)
     assert window._frame_index == 1
     assert not first.with_suffix(".json").exists()
-
-    qtbot.mouseClick(window._refine_frame_button, QtCore.Qt.MouseButton.LeftButton)
-    assert window._frame_refining
-    assert window._refine_frame_button.text() == "SAVE && NEXT"
 
     QtCore.QTimer.singleShot(0, lambda: dismiss_active_modal(qtbot=qtbot))
     qtbot.mouseClick(window._refine_frame_button, QtCore.Qt.MouseButton.LeftButton)
@@ -167,7 +164,6 @@ def test_frame_refinement_can_leave_early_after_saving_finished_jsons(
     )
     window.show()
 
-    qtbot.mouseClick(window._refine_frame_button, QtCore.Qt.MouseButton.LeftButton)
     qtbot.mouseClick(window._refine_frame_button, QtCore.Qt.MouseButton.LeftButton)
 
     assert first.with_suffix(".json").exists()
