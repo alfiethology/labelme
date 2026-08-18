@@ -8,6 +8,7 @@ import os
 import platform
 import re
 import subprocess
+import tempfile
 import time
 import typing
 import webbrowser
@@ -35,6 +36,10 @@ from . import _ai_models
 from . import _automation
 from . import _config
 from . import _utils
+from ._frame_refinement import FrameInferenceWorker
+from ._frame_refinement import FramePrediction
+from ._frame_refinement import VideoInferenceWorker
+from ._frame_refinement import save_refined_frame
 from ._label_file import LABEL_FILE_SUFFIX
 from ._label_file import Annotation
 from ._label_file import LabelFileError
@@ -179,6 +184,7 @@ class _Menus(NamedTuple):
     file: QtWidgets.QMenu
     edit: QtWidgets.QMenu
     view: QtWidgets.QMenu
+    refine: QtWidgets.QMenu
     help: QtWidgets.QMenu
     label_list: QtWidgets.QMenu
 
@@ -287,6 +293,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._custom_yolo = CustomYoloWidget(on_run=self._run_custom_yolo, parent=self)
         self._custom_yolo_model: object | None = None
         self._custom_yolo_model_path: Path | None = None
+        self._refine_thread: QtCore.QThread | None = None
+        self._refine_worker: FrameInferenceWorker | VideoInferenceWorker | None = None
+        self._refine_progress: QtWidgets.QProgressDialog | None = None
+        self._refine_total_frames = 0
+        self._refine_source_dir: Path | None = None
+        self._refine_output_dir: Path | None = None
+        self._pending_video_path: Path | None = None
+        self._pending_video_output_dir: Path | None = None
+        self._pending_video_frame_indices: list[int] | None = None
+        self._pending_video_cache: tempfile.TemporaryDirectory[str] | None = None
+        self._refinement_windows: list[QtWidgets.QWidget] = []
 
         self._setup_toolbars()
 
@@ -933,6 +950,7 @@ class MainWindow(QtWidgets.QMainWindow):
         edit_menu = self.menu(self.tr("&Edit"))
         view_menu = self.menu(self.tr("&View"))
         pose_menu = self.menu(self.tr("&Pose"))
+        refine_menu = self.menu(self.tr("&Refine"))
         help_menu = self.menu(self.tr("&Help"))
         label_menu = QtWidgets.QMenu()
         _utils.add_actions(label_menu, (self._actions.edit, self._actions.delete))
@@ -964,6 +982,23 @@ class MainWindow(QtWidgets.QMainWindow):
             ),
         )
         _utils.add_actions(help_menu, (help_, self._actions.about))
+        _utils.add_actions(
+            refine_menu,
+            (
+                action(
+                    self.tr("From Frames…"),
+                    self._refine_from_frames,
+                    tip=self.tr(
+                        "Find difficult frames with the active Custom YOLO model"
+                    ),
+                ),
+                action(
+                    self.tr("From Video…"),
+                    self._refine_from_video,
+                    tip=self.tr("Skim video frames and refine selected samples"),
+                ),
+            ),
+        )
         _utils.add_actions(
             pose_menu,
             (
@@ -1048,6 +1083,7 @@ class MainWindow(QtWidgets.QMainWindow):
             file=file_menu,
             edit=edit_menu,
             view=view_menu,
+            refine=refine_menu,
             help=help_menu,
             label_list=label_menu,
         )
@@ -1514,6 +1550,306 @@ class MainWindow(QtWidgets.QMainWindow):
         self._ai_annotation.hover_highlight_requested.connect(
             self._highlight_ai_buttons
         )
+
+    def _refine_from_frames(self) -> None:
+        if self._refine_thread is not None:
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Refine From Frames"),
+                self.tr("Frame inference is already running."),
+            )
+            return
+        model_path = self._custom_yolo.model_path
+        if not model_path.is_file():
+            QtWidgets.QMessageBox.warning(
+                self,
+                self.tr("Refine From Frames"),
+                self.tr("Model file does not exist:\n{}").format(model_path),
+            )
+            return
+
+        start_dir = self._prev_opened_dir or self.current_path()
+        source_value = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            self.tr("Choose Frame Directory"),
+            start_dir,
+            QtWidgets.QFileDialog.Option.ShowDirsOnly,
+        )
+        if not source_value:
+            return
+        source_dir = Path(source_value).resolve()
+        image_paths = [Path(path) for path in _scan_image_files(str(source_dir))]
+        if not image_paths:
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Refine From Frames"),
+                self.tr("The selected directory contains no supported images."),
+            )
+            return
+
+        progress = QtWidgets.QProgressDialog(
+            self.tr("Loading model…"),
+            self.tr("Cancel"),
+            0,
+            len(image_paths),
+            self,
+        )
+        progress.setWindowTitle(self.tr("Labelling Frames"))
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        thread = QtCore.QThread(self)
+        worker = FrameInferenceWorker(
+            image_paths=image_paths,
+            model_path=model_path,
+            confidence=self._custom_yolo.confidence,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_refine_inference_progress)
+        worker.completed.connect(self._on_refine_inference_completed)
+        worker.failed.connect(self._on_refine_inference_failed)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        progress.canceled.connect(worker.cancel, Qt.ConnectionType.DirectConnection)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_refine_worker)
+
+        self._refine_thread = thread
+        self._refine_worker = worker
+        self._refine_progress = progress
+        self._refine_total_frames = len(image_paths)
+        self._refine_source_dir = source_dir
+        self._refine_output_dir = source_dir
+        thread.start()
+
+    def _refine_from_video(self) -> None:
+        if self._refine_thread is not None:
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Refine From Video"),
+                self.tr("Frame inference is already running."),
+            )
+            return
+        model_path = self._custom_yolo.model_path
+        if not model_path.is_file():
+            QtWidgets.QMessageBox.warning(
+                self,
+                self.tr("Refine From Video"),
+                self.tr("Model file does not exist:\n{}").format(model_path),
+            )
+            return
+
+        start_dir = self._prev_opened_dir or self.current_path()
+        video_value, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("Choose Video"),
+            start_dir,
+            self.tr("Video files (*.mp4 *.mov *.avi *.mkv);;All files (*)"),
+        )
+        if not video_value:
+            return
+        video_path = Path(video_value).resolve()
+
+        try:
+            import cv2
+
+            capture = cv2.VideoCapture(str(video_path))
+            try:
+                frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            finally:
+                capture.release()
+        except Exception as error:
+            QtWidgets.QMessageBox.critical(
+                self,
+                self.tr("Refine From Video Failed"),
+                str(error),
+            )
+            return
+        if frame_count <= 0:
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Refine From Video"),
+                self.tr("Could not read any frames from this video."),
+            )
+            return
+
+        interval, accepted = QtWidgets.QInputDialog.getInt(
+            self,
+            self.tr("Video Skim Interval"),
+            self.tr("Review every Nth frame:"),
+            30,
+            1,
+            max(1, frame_count),
+            1,
+        )
+        if not accepted:
+            return
+
+        frame_indices = list(range(0, frame_count, interval))
+        output_dir = video_path.with_name(f"{video_path.stem}_refined_frames")
+        cache = tempfile.TemporaryDirectory(prefix=f"{video_path.stem}-labelme-skim-")
+        progress = QtWidgets.QProgressDialog(
+            self.tr("Loading model…"),
+            self.tr("Cancel"),
+            0,
+            len(frame_indices),
+            self,
+        )
+        progress.setWindowTitle(self.tr("Labelling Video Frames"))
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+
+        thread = QtCore.QThread(self)
+        worker = VideoInferenceWorker(
+            video_path=video_path,
+            frame_indices=frame_indices,
+            cache_dir=Path(cache.name),
+            model_path=model_path,
+            confidence=self._custom_yolo.confidence,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._on_refine_inference_progress)
+        worker.completed.connect(self._on_video_inference_completed)
+        worker.failed.connect(self._on_video_inference_failed)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        progress.canceled.connect(worker.cancel, Qt.ConnectionType.DirectConnection)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_refine_worker)
+
+        self._refine_thread = thread
+        self._refine_worker = worker
+        self._refine_progress = progress
+        self._refine_total_frames = len(frame_indices)
+        self._pending_video_path = video_path
+        self._pending_video_output_dir = output_dir
+        self._pending_video_frame_indices = frame_indices
+        self._pending_video_cache = cache
+        thread.start()
+
+    @QtCore.Slot(object)
+    def _on_video_inference_completed(self, value: object) -> None:
+        predictions = typing.cast(list[FramePrediction], value)
+        if self._refine_progress is not None:
+            self._refine_progress.close()
+        cache = self._pending_video_cache
+        if not predictions:
+            if cache is not None:
+                cache.cleanup()
+            self._clear_pending_video_inference()
+            self.show_status_message(self.tr("Video refinement was cancelled."), 5000)
+            return
+        assert self._pending_video_path is not None
+        assert self._pending_video_output_dir is not None
+        assert self._pending_video_frame_indices is not None
+        assert cache is not None
+        window = VideoSkimRefinementWindow(
+            video_path=self._pending_video_path,
+            output_dir=self._pending_video_output_dir,
+            frame_indices=self._pending_video_frame_indices,
+            predictions=predictions,
+            cache=cache,
+            config_file=self._config_file,
+            config_overrides=self._config_overrides,
+        )
+        self._refinement_windows.append(window)
+        window.destroyed.connect(
+            lambda: self._refinement_windows.remove(window)
+            if window in self._refinement_windows
+            else None
+        )
+        self._clear_pending_video_inference()
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    @QtCore.Slot(str)
+    def _on_video_inference_failed(self, details: str) -> None:
+        if self._refine_progress is not None:
+            self._refine_progress.close()
+        if self._pending_video_cache is not None:
+            self._pending_video_cache.cleanup()
+        self._clear_pending_video_inference()
+        logger.error("Video refinement inference failed:\n{}", details)
+        last_line = details.rstrip().splitlines()[-1] if details.strip() else details
+        QtWidgets.QMessageBox.critical(
+            self,
+            self.tr("Refine From Video Failed"),
+            last_line,
+        )
+
+    def _clear_pending_video_inference(self) -> None:
+        self._pending_video_path = None
+        self._pending_video_output_dir = None
+        self._pending_video_frame_indices = None
+        self._pending_video_cache = None
+
+    @QtCore.Slot(int, str)
+    def _on_refine_inference_progress(self, value: int, name: str) -> None:
+        progress = self._refine_progress
+        if progress is None:
+            return
+        progress.setLabelText(
+            self.tr("Labelling {name} ({value}/{total})…").format(
+                name=name,
+                value=value,
+                total=self._refine_total_frames,
+            )
+        )
+        progress.setValue(value)
+
+    @QtCore.Slot(object)
+    def _on_refine_inference_completed(self, value: object) -> None:
+        predictions = typing.cast(list[FramePrediction], value)
+        if self._refine_progress is not None:
+            self._refine_progress.close()
+        if not predictions:
+            self.show_status_message(self.tr("Frame refinement was cancelled."), 5000)
+            return
+        assert self._refine_source_dir is not None
+        assert self._refine_output_dir is not None
+        window = FrameRefinementWindow(
+            predictions=predictions,
+            source_dir=self._refine_source_dir,
+            output_dir=self._refine_output_dir,
+            model_path=self._custom_yolo.model_path,
+            config_file=self._config_file,
+            config_overrides=self._config_overrides,
+        )
+        window.destroyed.connect(
+            lambda: self._refinement_windows.remove(window)
+            if window in self._refinement_windows
+            else None
+        )
+        self._refinement_windows.append(window)
+        window.show()
+        window.raise_()
+        window.activateWindow()
+
+    @QtCore.Slot(str)
+    def _on_refine_inference_failed(self, details: str) -> None:
+        if self._refine_progress is not None:
+            self._refine_progress.close()
+        logger.error("Frame refinement inference failed:\n{}", details)
+        last_line = details.rstrip().splitlines()[-1] if details.strip() else details
+        QtWidgets.QMessageBox.critical(
+            self,
+            self.tr("Refine From Frames Failed"),
+            last_line,
+        )
+
+    @QtCore.Slot()
+    def _clear_refine_worker(self) -> None:
+        self._refine_thread = None
+        self._refine_worker = None
+        self._refine_progress = None
+        self._refine_total_frames = 0
 
     def _run_custom_yolo(self) -> None:
         if self._image.isNull() or self._image_path is None:
@@ -3095,6 +3431,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.restoreState(self._default_state)
 
     def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
+        if self._refine_worker is not None:
+            self._refine_worker.cancel()
+            if self._refine_progress is not None:
+                self._refine_progress.setLabelText(
+                    self.tr("Cancelling frame inference…")
+                )
+            self.show_status_message(
+                self.tr("Cancelling frame inference; close again when it finishes."),
+                5000,
+            )
+            a0.ignore()
+            return
         if not self._can_continue():
             a0.ignore()
         self._window_state.setValue("window/size", self.size())
@@ -3785,6 +4133,497 @@ class MainWindow(QtWidgets.QMainWindow):
         stats.append(f"mode={self._canvas_widgets.canvas.mode.name}")
         stats.append(f"x={mouse_pos.x():6.1f}, y={mouse_pos.y():6.1f}")
         self._status_bar.stats.setText(" | ".join(stats))
+
+
+class FrameRefinementWindow(MainWindow):
+    """A separate Labelme editor for retaining only corrected model frames."""
+
+    def __init__(
+        self,
+        *,
+        predictions: list[FramePrediction],
+        source_dir: Path,
+        output_dir: Path,
+        model_path: Path,
+        config_file: Path | None,
+        config_overrides: dict,
+    ) -> None:
+        if not predictions:
+            raise ValueError("predictions must not be empty")
+        self._frame_predictions = predictions
+        self._frame_source_dir = source_dir
+        self._frame_output_dir = output_dir
+        self._frame_model_path = model_path
+        self._frame_index = 0
+        self._frame_refining = False
+        self._frame_kept = 0
+        self._frame_skipped = 0
+        super().__init__(
+            config_file=config_file,
+            config_overrides=config_overrides,
+        )
+        self.setWindowTitle(self.tr("Labelme - Refine From Frames"))
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._menus.refine.menuAction().setVisible(False)
+        self._docks.file_dock.hide()
+        for item in (
+            self._actions.open,
+            self._actions.open_dir,
+            self._actions.open_next_img,
+            self._actions.open_prev_img,
+            self._actions.save,
+            self._actions.save_as,
+            self._actions.delete_file,
+        ):
+            item.setEnabled(False)
+        self._setup_refinement_controls()
+        self._populate_refinement_files()
+        self._show_refinement_frame()
+
+    def _setup_refinement_controls(self) -> None:
+        controls = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(controls)
+        layout.setContentsMargins(12, 8, 12, 8)
+        self._frame_progress_label = QtWidgets.QLabel()
+        self._frame_progress_label.setMinimumWidth(210)
+        layout.addWidget(self._frame_progress_label)
+        layout.addStretch(1)
+
+        self._skip_frame_button = QtWidgets.QPushButton(self.tr("SKIP"))
+        self._skip_frame_button.setMinimumSize(220, 64)
+        self._emphasize_refinement_button(self._skip_frame_button)
+        self._skip_frame_button.setToolTip(
+            self.tr("Prediction is correct; do not copy this frame")
+        )
+        self._skip_frame_button.clicked.connect(self._skip_refinement_frame)
+        layout.addWidget(self._skip_frame_button)
+
+        self._leave_refinement_button = QtWidgets.QPushButton(self.tr("LEAVE EARLY"))
+        self._leave_refinement_button.setMinimumSize(220, 64)
+        self._emphasize_refinement_button(self._leave_refinement_button)
+        self._leave_refinement_button.setToolTip(
+            self.tr("Exit frame review and keep annotations already saved")
+        )
+        self._leave_refinement_button.clicked.connect(self._leave_refinement_early)
+        layout.addWidget(self._leave_refinement_button)
+
+        self._refine_frame_button = QtWidgets.QPushButton(self.tr("REFINE"))
+        self._refine_frame_button.setMinimumSize(220, 64)
+        self._emphasize_refinement_button(self._refine_frame_button)
+        self._refine_frame_button.setDefault(True)
+        self._refine_frame_button.setToolTip(
+            self.tr("Edit this prediction and retain the corrected frame")
+        )
+        self._refine_frame_button.clicked.connect(self._refine_or_save_frame)
+        layout.addWidget(self._refine_frame_button)
+
+        dock = QtWidgets.QDockWidget(self.tr("Frame Review"), self)
+        dock.setObjectName("FrameReview")
+        dock.setFeatures(QtWidgets.QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        dock.setTitleBarWidget(QtWidgets.QWidget())
+        dock.setWidget(controls)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+
+    @staticmethod
+    def _emphasize_refinement_button(button: QtWidgets.QPushButton) -> None:
+        font = button.font()
+        font.setWeight(QtGui.QFont.Weight.Bold)
+        if font.pointSize() > 0:
+            font.setPointSize(max(18, font.pointSize() + 4))
+        elif font.pixelSize() > 0:
+            font.setPixelSize(max(22, font.pixelSize() + 6))
+        button.setFont(font)
+
+    def _populate_refinement_files(self) -> None:
+        with QtCore.QSignalBlocker(self._docks.file_list):
+            self._docks.file_list.clear()
+            for prediction in self._frame_predictions:
+                self._docks.file_list.addItem(str(prediction.image_path))
+
+    def _show_refinement_frame(self) -> None:
+        prediction = self._frame_predictions[self._frame_index]
+        with QtCore.QSignalBlocker(self._docks.file_list):
+            self._docks.file_list.setCurrentRow(self._frame_index)
+        self._load_file(str(prediction.image_path))
+        self._docks.label_list.clear()
+        self._canvas_widgets.canvas.load_shapes(shapes=[], replace=True)
+        self._load_shapes(
+            shapes=[shape.copy() for shape in prediction.shapes], replace=True
+        )
+        self.mark_clean()
+        self._frame_refining = False
+        self._refine_frame_button.setText(self.tr("REFINE"))
+        self._frame_progress_label.setText(
+            self.tr(
+                "Frame {current}/{total}  •  kept {kept}  •  skipped {skipped}"
+            ).format(
+                current=self._frame_index + 1,
+                total=len(self._frame_predictions),
+                kept=self._frame_kept,
+                skipped=self._frame_skipped,
+            )
+        )
+        self.show_status_message(
+            self.tr("Choose SKIP if the prediction is correct, or REFINE to edit it."),
+            0,
+        )
+
+    @QtCore.Slot()
+    def _skip_refinement_frame(self) -> None:
+        self._frame_skipped += 1
+        self._advance_refinement_frame()
+
+    @QtCore.Slot()
+    def _refine_or_save_frame(self) -> None:
+        if not self._frame_refining:
+            self._frame_refining = True
+            self._switch_canvas_mode(edit=True)
+            self._refine_frame_button.setText(self.tr("SAVE && NEXT"))
+            self.show_status_message(
+                self.tr(
+                    "Edit, add, or delete shapes, then choose SAVE & NEXT. "
+                    "The JSON annotation will be saved beside the source frame."
+                ),
+                0,
+            )
+            self._canvas_widgets.canvas.setFocus()
+            return
+
+        if not self._save_current_refinement_frame():
+            return
+        self._frame_kept += 1
+        self._advance_refinement_frame()
+
+    def _save_current_refinement_frame(self) -> bool:
+        prediction = self._frame_predictions[self._frame_index]
+        shapes = [shape.copy() for shape in self._canvas_widgets.canvas.shapes]
+        try:
+            save_refined_frame(
+                source_root=self._frame_source_dir,
+                output_root=self._frame_output_dir,
+                image_path=prediction.image_path,
+                shapes=shapes,
+                image_height=self._image.height(),
+                image_width=self._image.width(),
+            )
+        except (LabelFileError, OSError, ValueError) as error:
+            QtWidgets.QMessageBox.critical(
+                self,
+                self.tr("Could Not Save Refined Frame"),
+                str(error),
+            )
+            return False
+        return True
+
+    @QtCore.Slot()
+    def _leave_refinement_early(self) -> None:
+        if self._frame_refining:
+            choice = QtWidgets.QMessageBox.question(
+                self,
+                self.tr("Leave Frame Refinement?"),
+                self.tr("Save the current frame's annotation before leaving?"),
+                QtWidgets.QMessageBox.StandardButton.Save
+                | QtWidgets.QMessageBox.StandardButton.Discard
+                | QtWidgets.QMessageBox.StandardButton.Cancel,
+                QtWidgets.QMessageBox.StandardButton.Save,
+            )
+            if choice == QtWidgets.QMessageBox.StandardButton.Cancel:
+                return
+            if choice == QtWidgets.QMessageBox.StandardButton.Save:
+                if not self._save_current_refinement_frame():
+                    return
+                self._frame_kept += 1
+            self.mark_clean()
+        self.close()
+
+    def _advance_refinement_frame(self) -> None:
+        self.mark_clean()
+        if self._frame_index + 1 < len(self._frame_predictions):
+            self._frame_index += 1
+            self._show_refinement_frame()
+            return
+        self._skip_frame_button.setEnabled(False)
+        self._leave_refinement_button.setEnabled(False)
+        self._refine_frame_button.setEnabled(False)
+        self._frame_progress_label.setText(
+            self.tr("Complete  •  kept {kept}  •  skipped {skipped}").format(
+                kept=self._frame_kept, skipped=self._frame_skipped
+            )
+        )
+        QtWidgets.QMessageBox.information(
+            self,
+            self.tr("Frame Refinement Complete"),
+            self.tr(
+                "Saved {kept} corrected annotations beside their frames in:\n"
+                "{output}\n\nSkipped {skipped} frames; their images have no new "
+                "annotation. No source images were changed."
+            ).format(
+                kept=self._frame_kept,
+                skipped=self._frame_skipped,
+                output=self._frame_output_dir,
+            ),
+        )
+
+    def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
+        if self._is_changed:
+            choice = QtWidgets.QMessageBox.question(
+                self,
+                self.tr("Close Frame Refinement?"),
+                self.tr(
+                    "The current frame has unsaved refinements. Close and discard "
+                    "those edits?"
+                ),
+                QtWidgets.QMessageBox.StandardButton.Discard
+                | QtWidgets.QMessageBox.StandardButton.Cancel,
+                QtWidgets.QMessageBox.StandardButton.Cancel,
+            )
+            if choice != QtWidgets.QMessageBox.StandardButton.Discard:
+                a0.ignore()
+                return
+            self.mark_clean()
+        super().closeEvent(a0)
+
+
+class VideoSkimRefinementWindow(MainWindow):
+    """A separate editor for sampled video frames with predicted shapes."""
+
+    def __init__(
+        self,
+        *,
+        video_path: Path,
+        output_dir: Path,
+        frame_indices: list[int],
+        predictions: list[FramePrediction],
+        cache: tempfile.TemporaryDirectory[str],
+        config_file: Path | None,
+        config_overrides: dict,
+    ) -> None:
+        if not frame_indices:
+            raise ValueError("frame_indices must not be empty")
+        if len(predictions) != len(frame_indices):
+            raise ValueError("predictions must match frame_indices")
+        self._video_path = video_path
+        self._video_output_dir = output_dir
+        self._video_frame_indices = frame_indices
+        self._video_predictions = predictions
+        self._video_index = 0
+        self._video_refining = False
+        self._video_kept = 0
+        self._video_skipped = 0
+        self._video_cache = cache
+        self._video_cache_dir = Path(self._video_cache.name)
+        self._video_current_frame_path: Path | None = None
+        super().__init__(
+            config_file=config_file,
+            config_overrides=config_overrides,
+        )
+        self.setWindowTitle(self.tr("Labelme - Refine From Video"))
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._menus.refine.menuAction().setVisible(False)
+        self._docks.file_dock.hide()
+        for item in (
+            self._actions.open,
+            self._actions.open_dir,
+            self._actions.open_next_img,
+            self._actions.open_prev_img,
+            self._actions.save,
+            self._actions.save_as,
+            self._actions.delete_file,
+        ):
+            item.setEnabled(False)
+        self._setup_video_refinement_controls()
+        self._show_video_frame()
+
+    def _setup_video_refinement_controls(self) -> None:
+        controls = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(controls)
+        layout.setContentsMargins(12, 8, 12, 8)
+        self._video_progress_label = QtWidgets.QLabel()
+        self._video_progress_label.setMinimumWidth(280)
+        layout.addWidget(self._video_progress_label)
+        layout.addStretch(1)
+
+        self._video_skip_button = QtWidgets.QPushButton(self.tr("SKIP"))
+        self._video_skip_button.setMinimumSize(220, 64)
+        FrameRefinementWindow._emphasize_refinement_button(self._video_skip_button)
+        self._video_skip_button.setToolTip(
+            self.tr("Do not keep this sampled video frame")
+        )
+        self._video_skip_button.clicked.connect(self._skip_video_frame)
+        layout.addWidget(self._video_skip_button)
+
+        self._video_leave_button = QtWidgets.QPushButton(self.tr("LEAVE EARLY"))
+        self._video_leave_button.setMinimumSize(220, 64)
+        FrameRefinementWindow._emphasize_refinement_button(self._video_leave_button)
+        self._video_leave_button.setToolTip(
+            self.tr("Exit video review and keep annotations already saved")
+        )
+        self._video_leave_button.clicked.connect(self._leave_video_early)
+        layout.addWidget(self._video_leave_button)
+
+        self._video_refine_button = QtWidgets.QPushButton(self.tr("REFINE"))
+        self._video_refine_button.setMinimumSize(220, 64)
+        FrameRefinementWindow._emphasize_refinement_button(self._video_refine_button)
+        self._video_refine_button.setDefault(True)
+        self._video_refine_button.setToolTip(
+            self.tr("Edit this prediction and save the extracted frame and JSON")
+        )
+        self._video_refine_button.clicked.connect(self._refine_or_save_video_frame)
+        layout.addWidget(self._video_refine_button)
+
+        dock = QtWidgets.QDockWidget(self.tr("Video Review"), self)
+        dock.setObjectName("VideoReview")
+        dock.setFeatures(QtWidgets.QDockWidget.DockWidgetFeature.NoDockWidgetFeatures)
+        dock.setTitleBarWidget(QtWidgets.QWidget())
+        dock.setWidget(controls)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, dock)
+
+    def _show_video_frame(self) -> None:
+        frame_index = self._video_frame_indices[self._video_index]
+        prediction = self._video_predictions[self._video_index]
+        frame_path = prediction.image_path
+        self._video_current_frame_path = frame_path
+        self._load_file(str(frame_path))
+        self._docks.label_list.clear()
+        self._canvas_widgets.canvas.load_shapes(shapes=[], replace=True)
+        self._load_shapes(
+            shapes=[shape.copy() for shape in prediction.shapes], replace=True
+        )
+        self.mark_clean()
+        self._video_refining = False
+        self._video_refine_button.setText(self.tr("REFINE"))
+        self._video_progress_label.setText(
+            self.tr(
+                "Sample {current}/{total}  •  frame {frame}  •  "
+                "kept {kept}  •  skipped {skipped}"
+            ).format(
+                current=self._video_index + 1,
+                total=len(self._video_frame_indices),
+                frame=frame_index + 1,
+                kept=self._video_kept,
+                skipped=self._video_skipped,
+            )
+        )
+        self.show_status_message(
+            self.tr("Choose SKIP if the prediction is correct, or REFINE to edit it."),
+            0,
+        )
+
+    @QtCore.Slot()
+    def _skip_video_frame(self) -> None:
+        self._video_skipped += 1
+        self._advance_video_frame()
+
+    @QtCore.Slot()
+    def _refine_or_save_video_frame(self) -> None:
+        if not self._video_refining:
+            self._video_refining = True
+            self._switch_canvas_mode(edit=True)
+            self._video_refine_button.setText(self.tr("SAVE && NEXT"))
+            self.show_status_message(
+                self.tr(
+                    "Edit, add, or delete shapes, then choose SAVE & NEXT. "
+                    "The extracted frame and JSON annotation will be saved."
+                ),
+                0,
+            )
+            self._canvas_widgets.canvas.setFocus()
+            return
+
+        if not self._save_current_video_frame():
+            return
+        self._video_kept += 1
+        self._advance_video_frame()
+
+    def _save_current_video_frame(self) -> bool:
+        assert self._video_current_frame_path is not None
+        shapes = [shape.copy() for shape in self._canvas_widgets.canvas.shapes]
+        try:
+            save_refined_frame(
+                source_root=self._video_cache_dir,
+                output_root=self._video_output_dir,
+                image_path=self._video_current_frame_path,
+                shapes=shapes,
+                image_height=self._image.height(),
+                image_width=self._image.width(),
+            )
+        except (LabelFileError, OSError, ValueError) as error:
+            QtWidgets.QMessageBox.critical(
+                self,
+                self.tr("Could Not Save Video Frame"),
+                str(error),
+            )
+            return False
+        return True
+
+    @QtCore.Slot()
+    def _leave_video_early(self) -> None:
+        if self._video_refining:
+            choice = QtWidgets.QMessageBox.question(
+                self,
+                self.tr("Leave Video Refinement?"),
+                self.tr("Save the current frame's annotation before leaving?"),
+                QtWidgets.QMessageBox.StandardButton.Save
+                | QtWidgets.QMessageBox.StandardButton.Discard
+                | QtWidgets.QMessageBox.StandardButton.Cancel,
+                QtWidgets.QMessageBox.StandardButton.Save,
+            )
+            if choice == QtWidgets.QMessageBox.StandardButton.Cancel:
+                return
+            if choice == QtWidgets.QMessageBox.StandardButton.Save:
+                if not self._save_current_video_frame():
+                    return
+                self._video_kept += 1
+            self.mark_clean()
+        self.close()
+
+    def _advance_video_frame(self) -> None:
+        self.mark_clean()
+        if self._video_index + 1 < len(self._video_frame_indices):
+            self._video_index += 1
+            self._show_video_frame()
+            return
+        self._video_skip_button.setEnabled(False)
+        self._video_leave_button.setEnabled(False)
+        self._video_refine_button.setEnabled(False)
+        self._video_progress_label.setText(
+            self.tr("Complete  •  kept {kept}  •  skipped {skipped}").format(
+                kept=self._video_kept, skipped=self._video_skipped
+            )
+        )
+        QtWidgets.QMessageBox.information(
+            self,
+            self.tr("Video Refinement Complete"),
+            self.tr(
+                "Saved {kept} corrected annotations and extracted frames in:\n"
+                "{output}\n\nSkipped {skipped} sampled frames."
+            ).format(
+                kept=self._video_kept,
+                skipped=self._video_skipped,
+                output=self._video_output_dir,
+            ),
+        )
+
+    def closeEvent(self, a0: QtGui.QCloseEvent) -> None:
+        if self._is_changed:
+            choice = QtWidgets.QMessageBox.question(
+                self,
+                self.tr("Close Video Refinement?"),
+                self.tr(
+                    "The current frame has unsaved refinements. Close and discard "
+                    "those edits?"
+                ),
+                QtWidgets.QMessageBox.StandardButton.Discard
+                | QtWidgets.QMessageBox.StandardButton.Cancel,
+                QtWidgets.QMessageBox.StandardButton.Cancel,
+            )
+            if choice != QtWidgets.QMessageBox.StandardButton.Discard:
+                a0.ignore()
+                return
+            self.mark_clean()
+        super().closeEvent(a0)
+        if a0.isAccepted():
+            self._video_cache.cleanup()
 
 
 def _shapes_from_dicts(
