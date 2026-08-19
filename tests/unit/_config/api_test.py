@@ -20,6 +20,30 @@ def test_default_label_color_is_yellow() -> None:
     assert config["shape"]["select_fill_color"] == [255, 255, 0, 64]
 
 
+def test_default_point_tool_shortcut_is_p() -> None:
+    config = _config.load_config(config_file=None, config_overrides={})
+
+    assert config["shortcuts"]["create_point"] == "P"
+
+
+def test_load_config_migrates_blank_point_tool_shortcut(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("shortcuts:\n  create_point:\n")
+
+    config = _config.load_config(config_file=config_file, config_overrides={})
+
+    assert config["shortcuts"]["create_point"] == "P"
+
+
+def test_load_config_keeps_custom_point_tool_shortcut(tmp_path: Path) -> None:
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text("shortcuts:\n  create_point: Ctrl+P\n")
+
+    config = _config.load_config(config_file=config_file, config_overrides={})
+
+    assert config["shortcuts"]["create_point"] == "Ctrl+P"
+
+
 def test_get_user_config_file_creates_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

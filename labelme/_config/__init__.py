@@ -93,6 +93,12 @@ def _migrate_config_from_file(config_from_yaml: dict) -> None:
         shortcuts = {}
     if shortcuts.pop("add_point_to_edge", None):
         logger.info("Migrating old config: removing shortcuts.add_point_to_edge")
+    if "create_point" in shortcuts and shortcuts["create_point"] is None:
+        logger.info(
+            "Migrating old config: shortcuts.create_point=None "
+            "-> shortcuts.create_point='P'"
+        )
+        shortcuts["create_point"] = "P"
 
     ai = config_from_yaml.get("ai")
     if (
