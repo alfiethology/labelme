@@ -142,6 +142,9 @@ Everything else, including the Python import surface, is internal and may change
 Run `labelme --help` for detail.\
 The annotations are saved as a [JSON](http://www.json.org/) file.
 
+To align polygon edges precisely, enable **Edit > Snap to Existing Points**;
+new polygon vertices will snap onto nearby vertices in existing annotations.
+
 ```bash
 labelme  # just open gui
 
