@@ -277,6 +277,7 @@ class Canvas(QtWidgets.QWidget):
         self._ai_assist_session = _automation.AiAssistSession()
         self._ai_inference_failed = False
         self._snapping = True
+        self._snap_to_existing_points = False
         self._hovered_shape_is_selected: bool = False
         self._painter = QtGui.QPainter()
         self._pan_anchor = None
@@ -309,6 +310,9 @@ class Canvas(QtWidgets.QWidget):
     def set_fill_editing(self, value: bool) -> None:
         self._fill_editing = value
         self.update()
+
+    def set_snap_to_existing_points(self, value: bool) -> None:
+        self._snap_to_existing_points = value
 
     def set_show_center_dots(self, value: bool) -> None:
         self._show_center_dots = value
@@ -795,6 +799,11 @@ class Canvas(QtWidgets.QWidget):
             )
         self._apply_cursor(CursorRole.DRAW)
         if self._current is None:
+            if (
+                not self._should_constrain_to_pixmap(pos)
+                and self._nearest_existing_vertex(pos=pos) is not None
+            ):
+                self._apply_cursor(CursorRole.HANDLE)
             self.update()
             self._update_status()
             return
@@ -829,10 +838,33 @@ class Canvas(QtWidgets.QWidget):
                 current.points[-1], pos, image_size=self.pixmap.size()
             )
         if not self._cursor_should_snap_to_polygon_origin(pos=pos):
-            return pos
+            snapped = self._nearest_existing_vertex(pos=pos)
+            if snapped is None:
+                return pos
+            self._apply_cursor(CursorRole.HANDLE)
+            return snapped
         self._apply_cursor(CursorRole.HANDLE)
         self._highlight_vertex(index=0, mode="near")
         return current.points[0]
+
+    def _nearest_existing_vertex(self, *, pos: QPointF) -> QPointF | None:
+        if not self._snap_to_existing_points or self.create_mode != "polygon":
+            return None
+        query = np.array([pos.x(), pos.y()])
+        nearest_point: np.ndarray | None = None
+        nearest_distance = float("inf")
+        for shape in reversed(self.shapes):
+            if not shape.visible or len(shape.points) == 0:
+                continue
+            distances = np.linalg.norm((shape.points - query) * self.scale, axis=1)
+            index = int(np.argmin(distances))
+            distance = float(distances[index])
+            if distance < nearest_distance:
+                nearest_point = shape.points[index]
+                nearest_distance = distance
+        if nearest_point is None or nearest_distance > self._epsilon:
+            return None
+        return QPointF(float(nearest_point[0]), float(nearest_point[1]))
 
     def _cursor_should_snap_to_polygon_origin(self, pos: QPointF) -> bool:
         if not self._snapping:
@@ -1162,10 +1194,16 @@ class Canvas(QtWidgets.QWidget):
         is_shift_pressed: bool,
     ) -> None:
         if self._current is not None:
+            if self.create_mode == "polygon":
+                pos = self._project_drawing_pos_into_image(pos=pos)
+                self._update_drawing_line(pos=pos, is_shift_pressed=is_shift_pressed)
             self._extend_current_shape(current=self._current, event=event)
             return
         if self._should_constrain_to_pixmap(pos):
             return
+        snapped = self._nearest_existing_vertex(pos=pos)
+        if snapped is not None:
+            pos = snapped
         self._start_new_shape(pos=pos, event=event, is_shift_pressed=is_shift_pressed)
 
     def _extend_current_shape(

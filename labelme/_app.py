@@ -166,6 +166,7 @@ class _Actions(NamedTuple):
     reset_layout: QtGui.QAction
     fill_drawing: QtGui.QAction
     fill_editing: QtGui.QAction
+    snap_to_existing_points: QtGui.QAction
     show_center_dots: QtGui.QAction
     hide_all: QtGui.QAction
     show_all: QtGui.QAction
@@ -725,6 +726,16 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         fill_editing.setChecked(self._config["canvas"]["fill_editing"])
         self._canvas_widgets.canvas.set_fill_editing(fill_editing.isChecked())
+        snap_to_existing_points = action(
+            self.tr("Snap to Existing Points"),
+            self._canvas_widgets.canvas.set_snap_to_existing_points,
+            None,
+            tip=self.tr(
+                "Snap new polygon vertices to nearby vertices in existing shapes"
+            ),
+            checkable=True,
+            checked=False,
+        )
         show_center_dots = action(
             self.tr("Show Center Dots"),
             self._canvas_widgets.canvas.set_show_center_dots,
@@ -846,6 +857,7 @@ class MainWindow(QtWidgets.QMainWindow):
             None,
             remove_point,
             None,
+            snap_to_existing_points,
             keep_prev_action,
             zoom_speed_menu,
         )
@@ -894,6 +906,7 @@ class MainWindow(QtWidgets.QMainWindow):
             reset_layout=reset_layout,
             fill_drawing=fill_drawing,
             fill_editing=fill_editing,
+            snap_to_existing_points=snap_to_existing_points,
             show_center_dots=show_center_dots,
             hide_all=hide_all,
             show_all=show_all,

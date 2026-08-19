@@ -119,6 +119,52 @@ def test_cursor_is_cross_when_hovering_in_create_mode(canvas: Canvas) -> None:
 
 
 @pytest.mark.gui
+def test_polygon_vertices_snap_to_existing_vertices_when_enabled(
+    canvas: Canvas,
+) -> None:
+    canvas.shapes = [
+        Shape(
+            shape_type="polygon",
+            points=np.array([[40.0, 20.0], [100.0, 20.0], [70.0, 70.0]]),
+        )
+    ]
+    canvas.set_editing(value=False)
+    canvas.create_mode = "polygon"
+    canvas.set_snap_to_existing_points(True)
+
+    near_first = QPointF(45.0, 23.0)
+    canvas.mouseMoveEvent(_make_move_event(pos=near_first))
+    canvas.mousePressEvent(
+        _make_press_event(pos=near_first, button=Qt.MouseButton.LeftButton)
+    )
+    assert canvas._current is not None
+    assert canvas._current.points[0] == QPointF(40.0, 20.0)
+
+    near_second = QPointF(96.0, 24.0)
+    canvas.mouseMoveEvent(_make_move_event(pos=near_second))
+    canvas.mousePressEvent(
+        _make_press_event(pos=near_second, button=Qt.MouseButton.LeftButton)
+    )
+    assert canvas._current.points[1] == QPointF(100.0, 20.0)
+
+
+@pytest.mark.gui
+def test_polygon_vertices_do_not_snap_when_disabled(canvas: Canvas) -> None:
+    canvas.shapes = [Shape(shape_type="point", points=np.array([[40.0, 20.0]]))]
+    canvas.set_editing(value=False)
+    canvas.create_mode = "polygon"
+
+    click = QPointF(45.0, 23.0)
+    canvas.mouseMoveEvent(_make_move_event(pos=click))
+    canvas.mousePressEvent(
+        _make_press_event(pos=click, button=Qt.MouseButton.LeftButton)
+    )
+
+    assert canvas._current is not None
+    assert canvas._current.points[0] == click
+
+
+@pytest.mark.gui
 def test_cursor_reverts_to_no_override_after_cursor_cleared(canvas: Canvas) -> None:
     # After _release_cursor the override stack is empty; callers treat that
     # as ArrowCursor.
