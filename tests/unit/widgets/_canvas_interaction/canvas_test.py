@@ -57,6 +57,17 @@ def _make_move_event(pos: QPointF) -> QtGui.QMouseEvent:
     )
 
 
+def _make_drag_event(pos: QPointF) -> QtGui.QMouseEvent:
+    return QtGui.QMouseEvent(
+        QtCore.QEvent.Type.MouseMove,
+        pos,
+        pos,
+        Qt.MouseButton.NoButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
 def _make_press_event(
     pos: QPointF,
     button: Qt.MouseButton = Qt.MouseButton.RightButton,
@@ -162,6 +173,135 @@ def test_polygon_vertices_do_not_snap_when_disabled(canvas: Canvas) -> None:
 
     assert canvas._current is not None
     assert canvas._current.points[0] == click
+
+
+@pytest.mark.gui
+def test_coincident_polygon_vertices_drag_together_when_snap_enabled(
+    canvas: Canvas,
+) -> None:
+    lower = Shape(
+        shape_type="polygon",
+        points=np.array([(20, 20), (80, 20), (50, 80)], dtype=np.float64),
+        closed=True,
+    )
+    upper = Shape(
+        shape_type="polygon",
+        points=np.array([(20, 20), (10, 70), (40, 70)], dtype=np.float64),
+        closed=True,
+    )
+    canvas.load_shapes(shapes=[lower, upper])
+    canvas.set_editing(value=True)
+    canvas.set_snap_to_existing_points(True)
+    start = _image_to_widget(canvas=canvas, img_x=20, img_y=20)
+    destination = _image_to_widget(canvas=canvas, img_x=35, img_y=30)
+
+    canvas.mouseMoveEvent(_make_move_event(pos=start))
+    canvas.mousePressEvent(
+        _make_press_event(pos=start, button=Qt.MouseButton.LeftButton)
+    )
+    canvas.mouseMoveEvent(_make_drag_event(pos=destination))
+    canvas.mouseReleaseEvent(
+        _make_release_event(pos=destination, button=Qt.MouseButton.LeftButton)
+    )
+
+    np.testing.assert_array_equal(lower.points[0], [35, 30])
+    np.testing.assert_array_equal(upper.points[0], [35, 30])
+    assert len(canvas.shape_backups) == 2
+
+
+@pytest.mark.gui
+def test_coincident_polygon_vertices_drag_individually_when_snap_disabled(
+    canvas: Canvas,
+) -> None:
+    lower = Shape(
+        shape_type="polygon",
+        points=np.array([(20, 20), (80, 20), (50, 80)], dtype=np.float64),
+        closed=True,
+    )
+    upper = Shape(
+        shape_type="polygon",
+        points=np.array([(20, 20), (10, 70), (40, 70)], dtype=np.float64),
+        closed=True,
+    )
+    canvas.load_shapes(shapes=[lower, upper])
+    canvas.set_editing(value=True)
+    start = _image_to_widget(canvas=canvas, img_x=20, img_y=20)
+    destination = _image_to_widget(canvas=canvas, img_x=35, img_y=30)
+
+    canvas.mouseMoveEvent(_make_move_event(pos=start))
+    canvas.mousePressEvent(
+        _make_press_event(pos=start, button=Qt.MouseButton.LeftButton)
+    )
+    canvas.mouseMoveEvent(_make_drag_event(pos=destination))
+    canvas.mouseReleaseEvent(
+        _make_release_event(pos=destination, button=Qt.MouseButton.LeftButton)
+    )
+
+    np.testing.assert_array_equal(lower.points[0], [20, 20])
+    np.testing.assert_array_equal(upper.points[0], [35, 30])
+
+
+@pytest.mark.gui
+def test_existing_polygon_vertex_snaps_onto_existing_point_while_dragging(
+    canvas: Canvas,
+) -> None:
+    target = Shape(
+        shape_type="polygon",
+        points=np.array([(70, 30), (90, 30), (80, 50)], dtype=np.float64),
+        closed=True,
+    )
+    moving = Shape(
+        shape_type="polygon",
+        points=np.array([(20, 20), (40, 20), (30, 40)], dtype=np.float64),
+        closed=True,
+    )
+    canvas.load_shapes(shapes=[target, moving])
+    canvas.set_editing(value=True)
+    canvas.set_snap_to_existing_points(True)
+    start = _image_to_widget(canvas=canvas, img_x=20, img_y=20)
+    near_target = _image_to_widget(canvas=canvas, img_x=75, img_y=34)
+
+    canvas.mouseMoveEvent(_make_move_event(pos=start))
+    canvas.mousePressEvent(
+        _make_press_event(pos=start, button=Qt.MouseButton.LeftButton)
+    )
+    canvas.mouseMoveEvent(_make_drag_event(pos=near_target))
+    canvas.mouseReleaseEvent(
+        _make_release_event(pos=near_target, button=Qt.MouseButton.LeftButton)
+    )
+
+    np.testing.assert_array_equal(moving.points[0], target.points[0])
+
+
+@pytest.mark.gui
+def test_existing_polygon_vertex_does_not_snap_while_snap_disabled(
+    canvas: Canvas,
+) -> None:
+    target = Shape(
+        shape_type="polygon",
+        points=np.array([(70, 30), (90, 30), (80, 50)], dtype=np.float64),
+        closed=True,
+    )
+    moving = Shape(
+        shape_type="polygon",
+        points=np.array([(20, 20), (40, 20), (30, 40)], dtype=np.float64),
+        closed=True,
+    )
+    canvas.load_shapes(shapes=[target, moving])
+    canvas.set_editing(value=True)
+    start = _image_to_widget(canvas=canvas, img_x=20, img_y=20)
+    near_target = _image_to_widget(canvas=canvas, img_x=75, img_y=34)
+
+    canvas.mouseMoveEvent(_make_move_event(pos=start))
+    canvas.mousePressEvent(
+        _make_press_event(pos=start, button=Qt.MouseButton.LeftButton)
+    )
+    canvas.mouseMoveEvent(_make_drag_event(pos=near_target))
+    canvas.mouseReleaseEvent(
+        _make_release_event(pos=near_target, button=Qt.MouseButton.LeftButton)
+    )
+
+    np.testing.assert_array_equal(moving.points[0], [75, 34])
 
 
 @pytest.mark.gui

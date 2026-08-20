@@ -75,7 +75,8 @@ See [Animal pose annotation](docs/pose-estimation.md) for the complete workflow.
 
 ### Faster manual editing
 
-- Snap new polygon vertices to points in existing annotations.
+- Snap new and existing polygon vertices to points in other annotations, then
+  drag coincident polygon vertices together while snapping remains enabled.
 - Enter point-drawing mode with the `P` shortcut and remove points quickly while
   editing.
 - Insert polygon vertices from edge interactions.
@@ -224,6 +225,10 @@ The annotations are saved as a [JSON](http://www.json.org/) file.
 
 To align polygon edges precisely, enable **Edit > Snap to Existing Points**;
 new polygon vertices will snap onto nearby vertices in existing annotations.
+In edit mode, an existing polygon vertex also snaps into the exact position of a
+nearby existing point. Dragging either of two polygon vertices already at the
+same position then moves both vertices together while this option remains
+enabled.
 
 ```bash
 labelme  # just open gui

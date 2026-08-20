@@ -179,6 +179,7 @@ class Canvas(QtWidgets.QWidget):
     _hovered_edge: int | None
     _last_hovered_edge: int | None
     _hovered_rotation: int | None
+    _vertex_drag_targets: list[tuple[Shape, int]]
 
     zoom_request = QtCore.Signal(int, QPointF)
     scroll_request = QtCore.Signal(int, Qt.Orientation)
@@ -966,14 +967,49 @@ class Canvas(QtWidgets.QWidget):
     def _drag_hovered_vertex(self, pos: QPointF, is_shift_pressed: bool) -> None:
         assert self._hovered_vertex is not None
         assert self.hovered_shape is not None
-        self._bounded_move_vertex(
-            shape=self.hovered_shape,
-            vertex_index=self._hovered_vertex,
-            pos=pos,
-            is_shift_pressed=is_shift_pressed,
-        )
+        targets = self._vertex_drag_targets or [
+            (self.hovered_shape, self._hovered_vertex)
+        ]
+        pos = self._snap_vertex_drag_pos(pos=pos, moving_targets=targets)
+        for shape, vertex_index in targets:
+            self._bounded_move_vertex(
+                shape=shape,
+                vertex_index=vertex_index,
+                pos=pos,
+                is_shift_pressed=is_shift_pressed,
+            )
         self.update()
         self._is_moving_shape = True
+
+    def _snap_vertex_drag_pos(
+        self, *, pos: QPointF, moving_targets: list[tuple[Shape, int]]
+    ) -> QPointF:
+        if (
+            not self._snap_to_existing_points
+            or self.hovered_shape is None
+            or self.hovered_shape.shape_type != "polygon"
+        ):
+            return pos
+
+        query = np.array([pos.x(), pos.y()])
+        nearest_point: np.ndarray | None = None
+        nearest_distance = float("inf")
+        for shape in reversed(self.shapes):
+            if not shape.visible:
+                continue
+            for index, point in enumerate(shape.points):
+                if any(
+                    shape is moving_shape and index == moving_index
+                    for moving_shape, moving_index in moving_targets
+                ):
+                    continue
+                distance = float(np.linalg.norm((point - query) * self.scale))
+                if distance < nearest_distance:
+                    nearest_point = point
+                    nearest_distance = distance
+        if nearest_point is None or nearest_distance > self._epsilon:
+            return pos
+        return QPointF(float(nearest_point[0]), float(nearest_point[1]))
 
     def _drag_hovered_rotation_point(self, pos: QPointF) -> None:
         assert self.hovered_shape is not None
@@ -1311,10 +1347,12 @@ class Canvas(QtWidgets.QWidget):
         self.update()
 
     def _press_left_while_editing(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
+        self._vertex_drag_targets = []
         modifiers = event.modifiers()
         if self._maybe_modify_polygon_topology(pos=pos, modifiers=modifiers):
             # remove_selected_point already repainted; just consume the press.
             return
+        self._capture_vertex_drag_targets()
         if self._is_rotation_point_selected():
             self._capture_rotation_anchors()
         self._select_shape_point(
@@ -1323,6 +1361,23 @@ class Canvas(QtWidgets.QWidget):
         )
         self._prev_point = pos
         self.update()
+
+    def _capture_vertex_drag_targets(self) -> None:
+        shape = self.hovered_shape
+        vertex_index = self._hovered_vertex
+        if shape is None or vertex_index is None:
+            return
+        if not self._snap_to_existing_points or shape.shape_type != "polygon":
+            return
+
+        point = shape.points[vertex_index]
+        self._vertex_drag_targets = [
+            (candidate, index)
+            for candidate in self.shapes
+            if candidate.visible and candidate.shape_type == "polygon"
+            for index, candidate_point in enumerate(candidate.points)
+            if np.array_equal(candidate_point, point)
+        ]
 
     def _maybe_modify_polygon_topology(
         self, pos: QPointF, modifiers: Qt.KeyboardModifier
@@ -1366,6 +1421,7 @@ class Canvas(QtWidgets.QWidget):
     def mouseReleaseEvent(self, a0: QtGui.QMouseEvent) -> None:
         self._dispatch_pointer_release(event=a0)
         self._commit_pending_shape_move()
+        self._vertex_drag_targets = []
         self._update_status()
 
     def _dispatch_pointer_release(self, event: QtGui.QMouseEvent) -> None:
@@ -2380,6 +2436,7 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_edges = []
         self._skeleton_edge_start = None
         self._skeleton_visibility_target = None
+        self._vertex_drag_targets = []
         self._current = None
         self.hovered_shape = None
         self._hovered_vertex = None
@@ -2454,6 +2511,7 @@ class Canvas(QtWidgets.QWidget):
         self._hovered_edge = None
         self._last_hovered_edge = None
         self._hovered_rotation = None
+        self._vertex_drag_targets = []
         self.update()
 
 
