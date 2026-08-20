@@ -10,7 +10,7 @@ from labelme._yolo_predictions import shapes_from_yolo_result
 
 
 def _result(**values: object) -> SimpleNamespace:
-    defaults = {
+    defaults: dict[str, object] = {
         "names": {0: "rat", 1: "mouse"},
         "boxes": None,
         "obb": None,

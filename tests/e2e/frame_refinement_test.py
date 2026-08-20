@@ -4,6 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 from PySide6 import QtCore
 from PySide6 import QtWidgets
@@ -24,7 +25,7 @@ def _write_test_video(path: Path) -> None:
 
     writer = cv2.VideoWriter(
         str(path),
-        cv2.VideoWriter_fourcc(*"MJPG"),
+        cv2.VideoWriter_fourcc(*"MJPG"),  # ty: ignore[unresolved-attribute]
         5.0,
         (40, 30),
     )
@@ -64,7 +65,7 @@ def test_refinement_progress_updates_run_on_gui_thread(
 ) -> None:
     window = raw_win
     recorder = _ProgressRecorder()
-    window._refine_progress = recorder
+    window._refine_progress = recorder  # ty: ignore[invalid-assignment]
     window._refine_total_frames = 1
     emitter = _ProgressEmitter()
     thread = QtCore.QThread()
@@ -94,7 +95,7 @@ def test_frame_refinement_skips_easy_frame_and_saves_refined_frame(
     shape = Shape(
         label="rat",
         shape_type="rectangle",
-        points=[[2, 3], [20, 25]],
+        points=np.array([[2, 3], [20, 25]], dtype=np.float64),
         closed=True,
     )
     window = FrameRefinementWindow(
@@ -148,7 +149,7 @@ def test_frame_refinement_can_leave_early_after_saving_finished_jsons(
     shape = Shape(
         label="rat",
         shape_type="rectangle",
-        points=[[2, 3], [20, 25]],
+        points=np.array([[2, 3], [20, 25]], dtype=np.float64),
         closed=True,
     )
     window = FrameRefinementWindow(
@@ -193,7 +194,7 @@ def test_video_skim_refinement_saves_only_refined_sampled_frames(
     shape = Shape(
         label="rat",
         shape_type="rectangle",
-        points=[[2, 3], [20, 25]],
+        points=np.array([[2, 3], [20, 25]], dtype=np.float64),
         closed=True,
     )
     window = VideoSkimRefinementWindow(

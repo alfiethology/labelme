@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
+from typing import Callable
 
 import numpy as np
 import pytest
@@ -77,11 +79,11 @@ def test_skeleton_file_defaults_flip_idx_to_identity(tmp_path: Path) -> None:
 def test_invalid_skeleton_file_is_rejected(
     *,
     skeleton: SkeletonTemplate,
-    change: object,
+    change: Callable[[dict[str, Any]], Any],
     message: str,
 ) -> None:
     value = skeleton.to_dict()
-    change(value)  # type: ignore[operator]
+    change(value)
 
     with pytest.raises(ValueError, match=message):
         SkeletonTemplate.from_dict(value)

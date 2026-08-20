@@ -1,25 +1,39 @@
+> [!IMPORTANT]
+> This project is a fork of [Labelme](https://github.com/wkentaro/labelme) by
+> [Kentaro Wada](https://github.com/wkentaro). The original repository is
+> available at <https://github.com/wkentaro/labelme>.
+>
+> This fork is maintained by [Alfiethology](https://github.com/alfiethology) and
+> adds:
+>
+> - animal pose annotation with reusable skeleton templates, keypoint visibility,
+>   rotation and YOLO pose export;
+> - custom Ultralytics YOLO inference plus review-and-refine workflows for image
+>   directories and sampled video frames; and
+> - faster manual annotation through point snapping, streamlined point editing,
+>   improved vertex insertion and zoom fixes.
+
 <h1 align="center">
   <img src="labelme/icons/icon-256.png" width="200" height="200"><br/>labelme
 </h1>
 
 <h4 align="center">
-  Image annotation with Python.
+  Animal-focused image, video and pose annotation with Python.
 </h4>
 
 <div align="center">
-  <a href="https://pypi.python.org/pypi/labelme"><img src="https://img.shields.io/pypi/v/labelme.svg"></a>
-  <!-- <a href="https://pypi.org/project/labelme"><img src="https://img.shields.io/pypi/pyversions/labelme.svg"></a> -->
-  <a href="https://github.com/wkentaro/labelme/actions"><img src="https://github.com/wkentaro/labelme/actions/workflows/test.yml/badge.svg?branch=main&event=push"></a>
-  <a href="https://discord.com/invite/uAjxGcJm83"><img src="https://dcbadge.limes.pink/api/server/uAjxGcJm83?style=flat"></a>
+  <a href="https://github.com/alfiethology/labelme/actions/workflows/test.yml"><img src="https://github.com/alfiethology/labelme/actions/workflows/test.yml/badge.svg?branch=main&event=push" alt="Tests"></a>
+  <a href="https://github.com/alfiethology/labelme/actions/workflows/lint.yml"><img src="https://github.com/alfiethology/labelme/actions/workflows/lint.yml/badge.svg?branch=main&event=push" alt="Lint"></a>
+  <a href="https://github.com/alfiethology/labelme"><img src="https://img.shields.io/badge/fork-Alfiethology-blue" alt="Alfiethology fork"></a>
 </div>
 
 <div align="center">
+  <a href="#about-this-fork"><b>About this fork</b></a>
+  | <a href="#fork-highlights"><b>Fork highlights</b></a>
+  |
   <a href="#installation"><b>Installation</b></a>
   | <a href="#usage"><b>Usage</b></a>
   | <a href="#examples"><b>Examples</b></a>
-  | <a href="https://labelme.io"><b>labelme.io ↗</b></a>
-  <!-- | <a href="https://github.com/wkentaro/labelme/discussions"><b>Community</b></a> -->
-  <!-- | <a href="https://www.youtube.com/playlist?list=PLI6LvFw0iflh3o33YYnVIfOpaO0hc5Dzw"><b>Youtube FAQ</b></a> -->
 </div>
 
 <br/>
@@ -28,12 +42,50 @@
   <img src="examples/instance_segmentation/.readme/annotation.jpg" width="70%">
 </div>
 
-## Description
+## About this fork
 
-Labelme is a graphical image annotation tool inspired by <http://labelme.csail.mit.edu>.\
-It is written in Python and uses Qt for its graphical interface.
+This repository extends the original Labelme desktop application for
+animal-behaviour and pose-estimation datasets. It keeps Labelme's familiar Qt
+annotation interface and JSON format while adding workflows for skeleton
+keypoints, model-assisted review and large collections of recorded frames.
 
-> Looking for a simple install without Python or Qt? Get the standalone app at **[labelme.io](https://labelme.io)**.
+The upstream project remains the right place for general Labelme documentation,
+releases and community support. Issues concerning the features described under
+**Fork highlights** should be reported in this repository.
+
+## Fork highlights
+
+### Animal pose annotation
+
+- Draw named skeleton keypoints and connect them into bones.
+- Mark individual keypoints as visible, occluded or missing.
+- Move, resize and rotate complete skeletons while retaining editable joints.
+- Save skeleton layouts as reusable `.skeleton.json` templates.
+- Export annotated directories as Ultralytics-compatible YOLO pose datasets.
+
+See [Animal pose annotation](docs/pose-estimation.md) for the complete workflow.
+
+### Model-assisted review and refinement
+
+- Load a custom Ultralytics `.pt` model and run it on the current image.
+- Pre-label a directory, review predicted shapes and save only corrected frames.
+- Sample every _n_th frame from a video, skip easy frames and retain difficult or
+  corrected examples as images with Labelme JSON annotations.
+- Configure the model confidence threshold directly in the toolbar.
+
+### Faster manual editing
+
+- Snap new polygon vertices to points in existing annotations.
+- Enter point-drawing mode with the `P` shortcut and remove points quickly while
+  editing.
+- Insert polygon vertices from edge interactions.
+- Use corrected and more predictable canvas zoom behaviour.
+
+## Upstream Labelme features
+
+Labelme is a graphical image annotation tool inspired by
+<http://labelme.csail.mit.edu>. It is written in Python and uses Qt for its
+graphical interface.
 
 <img src="examples/instance_segmentation/data_dataset_voc/JPEGImages/2011_000006.jpg" width="19%" /> <img src="examples/instance_segmentation/data_dataset_voc/SegmentationClass/2011_000006.png" width="19%" /> <img src="examples/instance_segmentation/data_dataset_voc/SegmentationClassVisualization/2011_000006.jpg" width="19%" /> <img src="examples/instance_segmentation/data_dataset_voc/SegmentationObject/2011_000006.png" width="19%" /> <img src="examples/instance_segmentation/data_dataset_voc/SegmentationObjectVisualization/2011_000006.jpg" width="19%" />\
 <i>VOC dataset example of instance segmentation.</i>
@@ -46,8 +98,6 @@ It is written in Python and uses Qt for its graphical interface.
 
 <img src="https://github.com/user-attachments/assets/53bf09db-b097-48b7-9f32-ab490da5ac53" width="32%" />
 <p><i>Multi-language support (English, 中文, 日本語, 한국어, Deutsch, Français, and more).</i></p>
-
-## Features
 
 - [x] Image annotation for polygon, rectangle, circle, line and point ([tutorial](examples/tutorial))
 - [x] Image flag annotation for classification and cleaning ([#166](https://github.com/wkentaro/labelme/pull/166))
@@ -62,27 +112,57 @@ It is written in Python and uses Qt for its graphical interface.
 
 ## Installation
 
-There are 3 options to install labelme:
+The GitHub source is currently the canonical distribution of this fork. PyPI,
+labelme.io and Linux distribution packages provide the upstream project and do
+not necessarily contain the fork features listed above.
 
-### Option 1: Using pip
+### Install this fork from GitHub
 
-For more detail, check ["Install Labelme using Terminal"](https://www.labelme.io/docs/install-labelme-terminal)
+Using `uv`:
 
 ```bash
-pip install labelme
-
-# To install the latest version from GitHub:
-# pip install git+https://github.com/wkentaro/labelme.git
+git clone https://github.com/alfiethology/labelme.git
+cd labelme
+uv sync
+uv run labelme
 ```
 
-### Option 2: Using standalone executable (Easiest)
+Or install the current fork directly with `pip`:
+
+```bash
+python -m pip install "labelme @ git+https://github.com/alfiethology/labelme.git"
+labelme
+```
+
+For a previously cloned development checkout, `launch_labelme.sh` starts the
+application with that checkout's `.venv`:
+
+```bash
+uv sync
+./launch_labelme.sh
+```
+
+### Install upstream Labelme
+
+If you do not need this fork's pose and refinement workflows, install the
+upstream release from PyPI:
+
+```bash
+python -m pip install labelme
+```
+
+For more detail, see
+[Install Labelme using Terminal](https://www.labelme.io/docs/install-labelme-terminal).
+
+### Upstream standalone executable
 
 If you're willing to invest in the convenience of simple installation without any dependencies (Python, Qt),
 you can download the standalone executable from ["Install Labelme as App"](https://www.labelme.io/docs/install-labelme-app).
 
-It's a one-time payment for lifetime access, and it helps us to maintain this project.
+This executable is produced by the upstream project and may not include this
+fork's features.
 
-### Option 3: Linux distribution packages
+### Upstream Linux distribution packages
 
 On some Linux distributions, labelme is also packaged in the system's native repository and can be installed with the distribution's standard package tooling. The badge below tracks which distributions currently ship labelme and which version each one provides:
 
@@ -161,6 +241,19 @@ cd examples/semantic_segmentation
 labelme data_annotated/  # Open directory to annotate all images in it
 labelme data_annotated/ --labels labels.txt  # specify label list with a file
 ```
+
+### Use a custom YOLO model
+
+1. In the **Custom YOLO Detector** toolbar panel, choose an Ultralytics `.pt`
+   model and set the confidence threshold.
+1. Open an image and select **Run** to add the model's predictions to the current
+   annotation.
+1. To review a collection instead, choose **Refine > From Frames…** and select
+   an image directory. Correct useful predictions with **SAVE AND NEXT**, or
+   skip frames that do not need attention.
+1. For recorded footage, choose **Refine > From Video…**, select a video and
+   choose the sampling interval. Refined frames and their JSON annotations are
+   written to `<video-name>_refined_frames` beside the video.
 
 ### Draw and save a skeleton
 

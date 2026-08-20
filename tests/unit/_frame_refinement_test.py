@@ -4,11 +4,13 @@ import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 from PIL import Image
 from pytest import MonkeyPatch
 
+from labelme._frame_refinement import FramePrediction
 from labelme._frame_refinement import VideoInferenceWorker
 from labelme._frame_refinement import save_refined_frame
 from labelme._shape import Shape
@@ -23,7 +25,7 @@ def test_video_inference_worker_extracts_and_predicts_sampled_frames(
     video_path = tmp_path / "clip.avi"
     writer = cv2.VideoWriter(
         str(video_path),
-        cv2.VideoWriter_fourcc(*"MJPG"),
+        cv2.VideoWriter_fourcc(*"MJPG"),  # ty: ignore[unresolved-attribute]
         5.0,
         (40, 30),
     )
@@ -70,7 +72,7 @@ def test_video_inference_worker_extracts_and_predicts_sampled_frames(
     worker.run()
 
     assert len(completed) == 1
-    predictions = completed[0]
+    predictions = cast(list[FramePrediction], completed[0])
     assert isinstance(predictions, list)
     assert [prediction.image_path.name for prediction in predictions] == [
         "clip-00000000.jpg",
@@ -92,7 +94,7 @@ def test_save_refined_frame_preserves_relative_directory(tmp_path: Path) -> None
     shape = Shape(
         label="rat",
         shape_type="rectangle",
-        points=[[1, 2], [10, 8]],
+        points=np.array([[1, 2], [10, 8]], dtype=np.float64),
         closed=True,
     )
 
