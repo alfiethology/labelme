@@ -253,6 +253,10 @@ labelme data_annotated/ --labels labels.txt  # specify label list with a file
    model and set the confidence threshold.
 1. Open an image and select **Run** to add the model's predictions to the current
    annotation.
+   Detection models create rectangles, instance- and semantic-segmentation models
+   create polygons, OBB models create oriented rectangles, and pose models create
+   skeletons. **Point gap** controls the approximate spacing, in image pixels,
+   between vertices of generated polygons.
 1. To review a collection instead, choose **Refine > From Frames…** and select
    an image directory. Correct useful predictions with **SAVE AND NEXT**, or
    skip frames that do not need attention.

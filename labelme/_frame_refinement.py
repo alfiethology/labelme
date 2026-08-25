@@ -32,11 +32,13 @@ class FrameInferenceWorker(QtCore.QObject):
         image_paths: list[Path],
         model_path: Path,
         confidence: float,
+        polygon_point_spacing: float = 10.0,
     ) -> None:
         super().__init__()
         self._image_paths = image_paths
         self._model_path = model_path
         self._confidence = confidence
+        self._polygon_point_spacing = polygon_point_spacing
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -69,6 +71,7 @@ class FrameInferenceWorker(QtCore.QObject):
                             results[0],
                             model_path=self._model_path,
                             model_metadata=metadata,
+                            polygon_point_spacing=self._polygon_point_spacing,
                         ),
                     )
                 )
@@ -91,6 +94,7 @@ class VideoInferenceWorker(QtCore.QObject):
         cache_dir: Path,
         model_path: Path,
         confidence: float,
+        polygon_point_spacing: float = 10.0,
     ) -> None:
         super().__init__()
         self._video_path = video_path
@@ -98,6 +102,7 @@ class VideoInferenceWorker(QtCore.QObject):
         self._cache_dir = cache_dir
         self._model_path = model_path
         self._confidence = confidence
+        self._polygon_point_spacing = polygon_point_spacing
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -147,6 +152,7 @@ class VideoInferenceWorker(QtCore.QObject):
                             results[0],
                             model_path=self._model_path,
                             model_metadata=metadata,
+                            polygon_point_spacing=self._polygon_point_spacing,
                         ),
                     )
                 )

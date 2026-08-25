@@ -67,6 +67,39 @@ def test_shapes_from_yolo_result_converts_segmentation_masks() -> None:
     np.testing.assert_array_equal(shapes[0].points, [[1, 2], [30, 2], [15, 40]])
 
 
+def test_shapes_from_yolo_result_converts_semantic_regions_with_point_spacing() -> None:
+    class_map = np.zeros((30, 40), dtype=np.uint8)
+    class_map[5:25, 10:30] = 1
+    result = _result()
+    result.semantic_mask = SimpleNamespace(data=class_map)
+
+    shapes = shapes_from_yolo_result(
+        result,
+        model_path=Path("yolo26n-sem.pt"),
+        polygon_point_spacing=5,
+    )
+
+    assert {shape.label for shape in shapes} == {"rat", "mouse"}
+    mouse = next(shape for shape in shapes if shape.label == "mouse")
+    assert mouse.shape_type == "polygon"
+    closed_points = np.vstack((mouse.points, mouse.points[0]))
+    gaps = np.linalg.norm(np.diff(closed_points, axis=0), axis=1)
+    assert gaps.max() <= 5
+    assert json.loads(mouse.description or "") == {"model": "yolo26n-sem.pt"}
+
+
+def test_shapes_from_yolo_result_maps_binary_semantic_class_one_to_only_name() -> None:
+    class_map = np.zeros((20, 20), dtype=np.uint8)
+    class_map[5:15, 5:15] = 1
+    result = _result(names={0: "foreground"})
+    result.semantic_mask = SimpleNamespace(data=class_map)
+
+    shapes = shapes_from_yolo_result(result, model_path=Path("binary-sem.pt"))
+
+    assert len(shapes) == 1
+    assert shapes[0].label == "foreground"
+
+
 def test_shapes_from_yolo_result_converts_pose_skeletons() -> None:
     boxes = _boxes(xyxy=[[1, 2, 30, 40]], classes=[0])
     keypoints = SimpleNamespace(

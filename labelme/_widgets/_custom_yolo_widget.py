@@ -56,8 +56,8 @@ class CustomYoloWidget(QtWidgets.QWidget):
         self._update_active_model_label(stored_path)
         layout.addWidget(self._active_model_label)
 
-        options = QtWidgets.QHBoxLayout()
-        options.addWidget(QtWidgets.QLabel(self.tr("Confidence")))
+        options = QtWidgets.QGridLayout()
+        options.addWidget(QtWidgets.QLabel(self.tr("Confidence")), 0, 0)
         self._confidence = QtWidgets.QDoubleSpinBox()
         self._confidence.setRange(0.01, 1.0)
         self._confidence.setSingleStep(0.05)
@@ -70,11 +70,31 @@ class CustomYoloWidget(QtWidgets.QWidget):
         self._confidence.valueChanged.connect(
             lambda value: self._settings.setValue("customYolo/confidence", value)
         )
-        options.addWidget(self._confidence)
+        options.addWidget(self._confidence, 0, 1)
+
+        options.addWidget(QtWidgets.QLabel(self.tr("Point gap")), 1, 0)
+        self._polygon_point_spacing = QtWidgets.QSpinBox()
+        self._polygon_point_spacing.setRange(1, 500)
+        self._polygon_point_spacing.setSuffix(self.tr(" px"))
+        self._polygon_point_spacing.setToolTip(
+            self.tr("Approximate spacing between polygon points")
+        )
+        self._polygon_point_spacing.setValue(
+            cast(
+                int,
+                self._settings.value("customYolo/polygonPointSpacing", 10, type=int),
+            )
+        )
+        self._polygon_point_spacing.valueChanged.connect(
+            lambda value: self._settings.setValue(
+                "customYolo/polygonPointSpacing", value
+            )
+        )
+        options.addWidget(self._polygon_point_spacing, 1, 1)
 
         run = QtWidgets.QPushButton(self.tr("Run"))
         run.clicked.connect(on_run)
-        options.addWidget(run)
+        options.addWidget(run, 0, 2, 2, 1)
         layout.addLayout(options)
 
         self.setMaximumWidth(320)
@@ -86,6 +106,10 @@ class CustomYoloWidget(QtWidgets.QWidget):
     @property
     def confidence(self) -> float:
         return self._confidence.value()
+
+    @property
+    def polygon_point_spacing(self) -> int:
+        return self._polygon_point_spacing.value()
 
     def _on_path_changed(self, path: str) -> None:
         self._settings.setValue("customYolo/modelPath", path)

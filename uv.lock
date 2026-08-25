@@ -893,7 +893,7 @@ requires-dist = [
     { name = "scikit-image", specifier = ">=0.21" },
     { name = "scipy", specifier = ">=1.8" },
     { name = "tifffile", specifier = ">=2024.1.30" },
-    { name = "ultralytics", specifier = ">=8.3" },
+    { name = "ultralytics", specifier = ">=8.4.52" },
 ]
 
 [package.metadata.requires-dev]

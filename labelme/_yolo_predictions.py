@@ -32,6 +32,117 @@ def _description(*, confidence: float, model_path: Path) -> str:
     return json.dumps({"confidence": confidence, "model": str(model_path)})
 
 
+def _model_description(*, model_path: Path) -> str:
+    return json.dumps({"model": str(model_path)})
+
+
+def _resample_closed_contour(
+    points: npt.NDArray[Any], *, point_spacing: float
+) -> npt.NDArray[np.float64]:
+    """Return points at approximately equal arc-length intervals."""
+
+    if point_spacing <= 0:
+        raise ValueError("Polygon point spacing must be greater than zero")
+    contour = np.asarray(points, dtype=np.float64).reshape(-1, 2)
+    if len(contour) < 3:
+        return contour
+    keep = np.r_[True, np.any(np.diff(contour, axis=0) != 0, axis=1)]
+    contour = contour[keep]
+    if len(contour) > 1 and np.array_equal(contour[0], contour[-1]):
+        contour = contour[:-1]
+    if len(contour) < 3:
+        return contour
+
+    following = np.roll(contour, -1, axis=0)
+    segment_lengths = np.linalg.norm(following - contour, axis=1)
+    nonzero = segment_lengths > 0
+    contour = contour[nonzero]
+    segment_lengths = segment_lengths[nonzero]
+    if len(contour) < 3:
+        return contour
+    perimeter = float(segment_lengths.sum())
+    if perimeter == 0:
+        return contour
+
+    point_count = max(3, int(np.ceil(perimeter / point_spacing)))
+    offsets = np.arange(point_count, dtype=np.float64) * perimeter / point_count
+    cumulative = np.r_[0.0, np.cumsum(segment_lengths)]
+    segment_indices = np.searchsorted(cumulative, offsets, side="right") - 1
+    fractions = (offsets - cumulative[segment_indices]) / segment_lengths[
+        segment_indices
+    ]
+    following = np.roll(contour, -1, axis=0)
+    return contour[segment_indices] + fractions[:, None] * (
+        following[segment_indices] - contour[segment_indices]
+    )
+
+
+def _semantic_shapes(
+    result: Any,  # noqa: ANN401
+    *,
+    model_path: Path,
+    point_spacing: float,
+) -> list[Shape]:
+    """Convert a dense semantic class map into one polygon per class region."""
+
+    import cv2
+
+    class_map = _to_numpy(result.semantic_mask.data)
+    if class_map.ndim == 3 and class_map.shape[0] == 1:
+        class_map = class_map[0]
+    if class_map.ndim != 2:
+        raise ValueError(
+            "Expected the YOLO semantic mask to have shape (height, width), "
+            f"but got {class_map.shape}"
+        )
+
+    names = result.names
+    shapes_by_area: list[tuple[float, Shape]] = []
+    for raw_class_id in np.unique(class_map):
+        class_id = int(raw_class_id)
+        if len(names) == 1:
+            # Ultralytics reserves 0 for the background of a binary semantic
+            # model and writes its only named class as 1 in the dense map.
+            if class_id != 1:
+                continue
+            label = _class_name(names, 0)
+        else:
+            try:
+                label = _class_name(names, class_id)
+            except (IndexError, KeyError):
+                continue
+        binary_mask = (class_map == raw_class_id).astype(np.uint8)
+        contours, _ = cv2.findContours(
+            binary_mask,
+            cv2.RETR_EXTERNAL,
+            cv2.CHAIN_APPROX_NONE,
+        )
+        for raw_contour in contours:
+            if len(raw_contour) < 3 or cv2.contourArea(raw_contour) <= 0:
+                continue
+            points = _resample_closed_contour(
+                raw_contour[:, 0, :], point_spacing=point_spacing
+            )
+            if len(points) < 3:
+                continue
+            shapes_by_area.append(
+                (
+                    float(cv2.contourArea(raw_contour)),
+                    Shape(
+                        label=label,
+                        shape_type="polygon",
+                        points=points,
+                        flags={},
+                        description=_model_description(model_path=model_path),
+                        closed=True,
+                    ),
+                )
+            )
+    # Large enclosing regions must be drawn first so nested, smaller regions
+    # can overwrite them when Labelme rasterizes overlapping polygons.
+    return [shape for _, shape in sorted(shapes_by_area, key=lambda item: -item[0])]
+
+
 def _prediction_values(predictions: Any) -> tuple[npt.NDArray, npt.NDArray]:  # noqa: ANN401
     return (
         _to_numpy(predictions.conf).astype(np.float64),
@@ -90,10 +201,19 @@ def shapes_from_yolo_result(
     *,
     model_path: Path,
     model_metadata: Mapping[str, Any] | None = None,
+    polygon_point_spacing: float | None = None,
 ) -> list[Shape]:
     """Convert one Ultralytics result into editable Labelme shapes."""
 
     names = result.names
+    if getattr(result, "semantic_mask", None) is not None:
+        return _semantic_shapes(
+            result,
+            model_path=model_path,
+            point_spacing=(
+                10.0 if polygon_point_spacing is None else polygon_point_spacing
+            ),
+        )
     if result.obb is not None:
         confidences, class_ids = _prediction_values(result.obb)
         points = _to_numpy(result.obb.xyxyxyxy).astype(np.float64)
@@ -174,7 +294,13 @@ def shapes_from_yolo_result(
             Shape(
                 label=_class_name(names, int(class_id)),
                 shape_type="polygon",
-                points=_to_numpy(points).astype(np.float64),
+                points=(
+                    _resample_closed_contour(
+                        _to_numpy(points), point_spacing=polygon_point_spacing
+                    )
+                    if polygon_point_spacing is not None
+                    else _to_numpy(points).astype(np.float64)
+                ),
                 flags={},
                 description=_description(
                     confidence=float(confidence), model_path=model_path

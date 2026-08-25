@@ -77,6 +77,7 @@ from ._widgets import UniqueLabelQListWidget
 from ._widgets import ZoomWidget
 from ._widgets import download_ai_model
 from ._widgets import format_shape_label
+from ._yolo_predictions import shapes_from_yolo_result
 
 
 class _ZoomMode(enum.Enum):
@@ -1617,6 +1618,7 @@ class MainWindow(QtWidgets.QMainWindow):
             image_paths=image_paths,
             model_path=model_path,
             confidence=self._custom_yolo.confidence,
+            polygon_point_spacing=self._custom_yolo.polygon_point_spacing,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -1723,6 +1725,7 @@ class MainWindow(QtWidgets.QMainWindow):
             cache_dir=Path(cache.name),
             model_path=model_path,
             confidence=self._custom_yolo.confidence,
+            polygon_point_spacing=self._custom_yolo.polygon_point_spacing,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -1916,34 +1919,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
                 return
             result = results[0]
-            predictions = result.boxes
-            prediction_kind = "boxes"
-            prediction_shape_type: ShapeType = "rectangle"
-            if predictions is None and result.obb is not None:
-                predictions = result.obb
-                prediction_kind = "oriented boxes"
-                prediction_shape_type = "oriented_rectangle"
-            if predictions is None:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    self.tr("Custom YOLO"),
-                    self.tr(
-                        "The selected model returned no boxes.\n\nActive model:\n{}"
-                    ).format(model_path),
-                )
-                return
-            if prediction_shape_type == "oriented_rectangle":
-                prediction_points = predictions.xyxyxyxy.detach().cpu().numpy()
-            else:
-                xyxy = predictions.xyxy.detach().cpu().numpy()
-                prediction_points = np.stack((xyxy[:, :2], xyxy[:, 2:]), axis=1)
-            confidences = predictions.conf.detach().cpu().numpy()
-            class_ids = predictions.cls.detach().cpu().numpy().astype(int)
-            names = result.names
+            model_yaml = getattr(getattr(model, "model", None), "yaml", None)
+            metadata = model_yaml if isinstance(model_yaml, dict) else {}
+            shapes = shapes_from_yolo_result(
+                result,
+                model_path=model_path,
+                model_metadata=metadata,
+                polygon_point_spacing=self._custom_yolo.polygon_point_spacing,
+            )
             logger.info(
-                "Custom YOLO returned {} {} from {!r}",
-                len(prediction_points),
-                prediction_kind,
+                "Custom YOLO returned {} shapes from {!r}",
+                len(shapes),
                 str(model_path),
             )
         except Exception as error:
@@ -1957,33 +1943,17 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             QtWidgets.QApplication.restoreOverrideCursor()
 
-        shapes = [
-            Shape(
-                label=str(names[int(class_id)]),
-                shape_type=prediction_shape_type,
-                points=np.asarray(points, dtype=np.float64),
-                flags={},
-                description=json.dumps(
-                    {
-                        "confidence": float(confidence),
-                        "model": str(model_path),
-                    }
-                ),
-                closed=True,
-            )
-            for points, confidence, class_id in zip(
-                prediction_points, confidences, class_ids, strict=True
-            )
-        ]
         if not shapes:
-            self.show_status_message(self.tr("Custom YOLO found no objects."), 5000)
+            self.show_status_message(
+                self.tr("Custom YOLO found no supported regions or objects."), 5000
+            )
             return
 
         self._canvas_widgets.canvas.backup_shapes()
         self._load_shapes(shapes, replace=False)
         self.mark_dirty()
         self.show_status_message(
-            self.tr("Custom YOLO added {} bounding boxes.").format(len(shapes)),
+            self.tr("Custom YOLO added {} annotations.").format(len(shapes)),
             5000,
         )
 
