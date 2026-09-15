@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from typing import Callable
 
 import numpy as np
 import pytest
@@ -11,7 +11,7 @@ import pytest
 from labelme._app import _shape_to_dict
 from labelme._app import _shapes_from_dicts
 from labelme._pose import SkeletonTemplate
-from labelme._pose import ensure_skeleton_oriented_bbox
+from labelme._pose import ensure_skeleton_axis_aligned_bbox
 from labelme._pose import make_skeleton_shape
 from labelme._pose import make_skeleton_shape_from_nodes
 from labelme._pose import read_skeleton_file
@@ -178,15 +178,30 @@ def test_legacy_two_corner_skeleton_is_upgraded_on_load(
     np.testing.assert_array_equal(keypoints, [[60, 40], [35, 200], [85, 200]])
 
 
-def test_ensure_skeleton_oriented_bbox_is_idempotent(
+def test_ensure_skeleton_axis_aligned_bbox_is_idempotent(
     skeleton: SkeletonTemplate,
 ) -> None:
     shape = make_skeleton_shape(skeleton=skeleton, bounds=(10, 20, 110, 220))
     original = shape.points.copy()
 
-    ensure_skeleton_oriented_bbox(shape)
+    ensure_skeleton_axis_aligned_bbox(shape)
 
     np.testing.assert_array_equal(shape.points, original)
+
+
+def test_ensure_skeleton_axis_aligned_bbox_encloses_rotated_box(
+    skeleton: SkeletonTemplate,
+) -> None:
+    shape = make_skeleton_shape(skeleton=skeleton, bounds=(10, 20, 110, 220))
+    keypoints = shape.points[4:].copy()
+    shape.points[:4] = np.array([(60, 0), (130, 120), (60, 240), (-10, 120)])
+
+    ensure_skeleton_axis_aligned_bbox(shape)
+
+    np.testing.assert_array_equal(
+        shape.points[:4], [(-10, 0), (130, 0), (130, 240), (-10, 240)]
+    )
+    np.testing.assert_array_equal(shape.points[4:], keypoints)
 
 
 def test_yolo_pose_row_uses_bbox_keypoints_and_visibility(

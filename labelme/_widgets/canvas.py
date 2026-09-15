@@ -24,7 +24,7 @@ from PySide6.QtCore import Qt
 from .. import _automation
 from .. import _shape
 from .. import _utils
-from .._pose import ensure_skeleton_oriented_bbox
+from .._pose import ensure_skeleton_axis_aligned_bbox
 from .._pose import skeleton_shape_parts
 from .._shape import POLYLINE_SHAPE_TYPES
 from .._shape import Shape
@@ -1034,7 +1034,6 @@ class Canvas(QtWidgets.QWidget):
         handle = _shape.get_rotation_handle(
             shape=self.hovered_shape,
             index=self._hovered_rotation,
-            offset=_shape.ROTATION_HANDLE_OFFSET_PX / self.scale,
         )
         self._rotation_center = _shape.rotation_center(shape=self.hovered_shape)
         self._rotation_initial_angle = _utils.direction_angle(
@@ -1795,7 +1794,7 @@ class Canvas(QtWidgets.QWidget):
     def _bounded_scale_skeleton(
         self, *, shape: Shape, vertex_index: int, pos: QPointF
     ) -> None:
-        ensure_skeleton_oriented_bbox(shape)
+        ensure_skeleton_axis_aligned_bbox(shape)
         old_bbox = shape.points[:4].copy()
         old_keypoints = shape.points[4:].copy()
         corners = tuple(QPointF(*point) for point in old_bbox)

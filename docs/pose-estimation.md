@@ -18,10 +18,9 @@ the [Ultralytics YOLO pose dataset format](https://docs.ultralytics.com/datasets
 5. Select **Finish Skeleton** (or press Enter/Space). Optionally enter horizontal
    mirror pairs such as `left_eye,right_eye`, one pair per line. Press Escape or
    select **Cancel** to discard the draft.
-6. Labelme creates a bounding box around the nodes. Drag a corner to stretch the
-   whole pose: the box, joints, and bones scale together. Drag the circular
-   handle above the box to rotate the entire pose. Drag an individual joint to
-   refine just that joint.
+6. Labelme creates a fixed-orientation bounding box around the nodes. Drag a
+   corner to stretch the whole pose: the box, joints, and bones scale together.
+   Drag an individual joint to refine just that joint.
 7. Right-click a keypoint and choose its visibility from the menu beside the
    cursor. Alternatively, select one Skeleton Shape and use
    **Pose > Set Keypoint Visibility…**. Choose
@@ -41,8 +40,7 @@ templates at the cursor. Choose a template to place it immediately, or use
 **Browse for Template…** or **Draw New Skeleton…** from the same menu. Up to ten
 recent templates are retained between Labelme sessions; missing or invalid files
 are removed from the menu automatically. A template is initially placed at the
-centre of the image at 20% of the image width and height, ready to be resized or
-rotated.
+centre of the image at 20% of the image width and height, ready to be resized.
 
 The template uses the suffix `.skeleton.json`. A placed Skeleton Shape embeds
 its keypoint definition in the Annotation File, so annotations remain loadable
@@ -75,8 +73,8 @@ class x_center y_center width height x1 y1 visibility1 ... xN yN visibilityN
 
 Coordinates are normalized during export. Keypoint visibility follows the
 standard three-state convention: `0` missing, `1` labeled but occluded, and `2`
-visible. Missing keypoints export as `0 0 0`. The on-screen transform box may
-be rotated; YOLO receives the axis-aligned box enclosing it.
+visible. Missing keypoints export as `0 0 0`. The on-screen bounding box remains
+axis-aligned, matching the box written to the YOLO pose label.
 
 Ultralytics uses one dataset-wide `kpt_shape` and `flip_idx`. If a dataset has
 multiple animal classes, their Skeleton Templates must currently have the same

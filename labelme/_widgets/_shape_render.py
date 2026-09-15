@@ -14,7 +14,6 @@ from PySide6 import QtGui
 from .. import _utils
 from .._pose import POSE_DATA_KEY
 from .._pose import skeleton_shape_parts
-from .._shape import ROTATION_HANDLE_OFFSET_PX
 from .._shape import Shape
 from .._shape import get_rotation_handle
 from .._shape import nearest_edge_index
@@ -281,12 +280,7 @@ def _build_shape_rotation_point_path(
         default_size=context.point_size,
         default_point_type=context.point_type,
     )
-    offset = (
-        ROTATION_HANDLE_OFFSET_PX / context.scale
-        if shape.shape_type == "skeleton"
-        else 0.0
-    )
-    handle = get_rotation_handle(shape=shape, index=vertex_index, offset=offset)
+    handle = get_rotation_handle(shape=shape, index=vertex_index)
     pos = QtCore.QPointF(*(handle * context.scale))
     _draw_vertex(path=path, pos=pos, size=size, point_type=point_type)
 
@@ -420,20 +414,6 @@ def _build_shape_points_paths(
             for point in bbox[1:]:
                 paths.line.lineTo(QtCore.QPointF(*(point * scale)))
             paths.line.lineTo(QtCore.QPointF(*(bbox[0] * scale)))
-            edge_midpoint = (bbox[0] + bbox[1]) / 2
-            handle = get_rotation_handle(
-                shape=shape,
-                index=0,
-                offset=ROTATION_HANDLE_OFFSET_PX / scale,
-            )
-            paths.line.moveTo(QtCore.QPointF(*(edge_midpoint * scale)))
-            paths.line.lineTo(QtCore.QPointF(*(handle * scale)))
-            _build_shape_rotation_point_path(
-                path=paths.rotation_vertices,
-                shape=shape,
-                context=context,
-                vertex_index=0,
-            )
         pose_data = shape.other_data.get(POSE_DATA_KEY, {})
         edges = pose_data.get("edges", []) if isinstance(pose_data, dict) else []
         visibility = (

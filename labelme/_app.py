@@ -50,7 +50,7 @@ from ._label_file import read_label_file
 from ._label_file import write_label_file
 from ._label_flags import compile_label_flags
 from ._pose import SkeletonTemplate
-from ._pose import ensure_skeleton_oriented_bbox
+from ._pose import ensure_skeleton_axis_aligned_bbox
 from ._pose import make_skeleton_shape
 from ._pose import make_skeleton_shape_from_nodes
 from ._pose import read_skeleton_file
@@ -4633,7 +4633,7 @@ def _shapes_from_dicts(
         shape.flags.update(shape_dict["flags"])
         shape.other_data = shape_dict["other_data"]
         if shape.shape_type == "skeleton":
-            ensure_skeleton_oriented_bbox(shape)
+            ensure_skeleton_axis_aligned_bbox(shape)
 
         shapes.append(shape)
     return shapes

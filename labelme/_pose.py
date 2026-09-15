@@ -403,20 +403,19 @@ def skeleton_shape_parts(
     return shape.points[:bbox_point_count], shape.points[bbox_point_count:]
 
 
-def ensure_skeleton_oriented_bbox(shape: Shape) -> None:
-    """Upgrade a legacy two-corner Skeleton Shape to four transform corners."""
+def ensure_skeleton_axis_aligned_bbox(shape: Shape) -> None:
+    """Store a Skeleton Shape's bounding box as four axis-aligned corners."""
 
     bbox, keypoints = skeleton_shape_parts(shape=shape)
-    if len(bbox) == 4:
-        return
-    (x1, y1), (x2, y2) = bbox
-    left, right = sorted((float(x1), float(x2)))
-    top, bottom = sorted((float(y1), float(y2)))
-    oriented_bbox = np.array(
+    left = float(bbox[:, 0].min())
+    right = float(bbox[:, 0].max())
+    top = float(bbox[:, 1].min())
+    bottom = float(bbox[:, 1].max())
+    axis_aligned_bbox = np.array(
         [[left, top], [right, top], [right, bottom], [left, bottom]],
         dtype=np.float64,
     )
-    shape.points = np.vstack((oriented_bbox, keypoints))
+    shape.points = np.vstack((axis_aligned_bbox, keypoints))
     shape.point_labels = np.ones(len(shape.points), dtype=np.int_)
 
 

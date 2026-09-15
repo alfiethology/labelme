@@ -37,7 +37,7 @@ def test_rotate_oriented_rectangle_around_origin() -> None:
         assert (shape.points[i][0], shape.points[i][1]) == pytest.approx((x, y))
 
 
-def test_rotate_skeleton_rotates_box_and_keypoints_together() -> None:
+def test_rotate_skeleton_raises() -> None:
     shape = Shape(
         shape_type="skeleton",
         points=np.array(
@@ -52,13 +52,8 @@ def test_rotate_skeleton_rotates_box_and_keypoints_together() -> None:
         ),
     )
 
-    _shape.rotate(shape=shape, center=np.array([5.0, 2.0]), angle=math.pi / 2)
-
-    np.testing.assert_allclose(
-        shape.points,
-        np.array([(7, -3), (7, 7), (3, 7), (3, -3), (5, 5)]),
-        atol=1e-12,
-    )
+    with pytest.raises(ValueError, match="only supported for oriented rectangles"):
+        _shape.rotate(shape=shape, center=np.array([5.0, 2.0]), angle=math.pi / 2)
 
 
 def test_oriented_rectangle_center_of_axis_aligned() -> None:
@@ -548,19 +543,17 @@ def test_get_rotation_handle_returns_edge_midpoints(
     assert handle == pytest.approx(expected)
 
 
-def test_skeleton_rotation_handle_is_offset_above_transform_box() -> None:
+def test_get_rotation_handle_rejects_skeleton() -> None:
     shape = Shape(
         shape_type="skeleton",
         points=np.array([(0, 0), (10, 0), (10, 4), (0, 4), (5, 2)], dtype=np.float64),
     )
 
-    handle = _shape.get_rotation_handle(shape=shape, index=0, offset=24.0)
-
-    assert handle == pytest.approx((5.0, -24.0))
-    assert _shape.rotation_center(shape=shape) == pytest.approx((5.0, 2.0))
+    with pytest.raises(ValueError, match="4-point oriented rectangles"):
+        _shape.get_rotation_handle(shape=shape, index=0)
 
 
-def test_nearest_rotation_point_index_finds_skeleton_handle() -> None:
+def test_nearest_rotation_point_index_ignores_skeleton() -> None:
     shape = Shape(
         shape_type="skeleton",
         points=np.array([(0, 0), (10, 0), (10, 4), (0, 4), (5, 2)], dtype=np.float64),
@@ -570,7 +563,7 @@ def test_nearest_rotation_point_index_finds_skeleton_handle() -> None:
         shape=shape, point=np.array([5.5, -24.0]), scale=1.0, epsilon=1.0
     )
 
-    assert index == 0
+    assert index is None
 
 
 def test_get_rotation_handle_raises_for_non_oriented_rectangle() -> None:

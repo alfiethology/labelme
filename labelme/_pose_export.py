@@ -10,7 +10,7 @@ import numpy as np
 from ._label_file import ShapeDict
 from ._label_file import read_label_file
 from ._pose import SkeletonTemplate
-from ._pose import ensure_skeleton_oriented_bbox
+from ._pose import ensure_skeleton_axis_aligned_bbox
 from ._pose import skeleton_template_from_shape
 from ._pose import write_skeleton_file
 from ._pose import yolo_dataset_yaml
@@ -161,7 +161,7 @@ def _shape_from_dict(shape: ShapeDict) -> Shape:
         closed=True,
     )
     if loaded.shape_type == "skeleton":
-        ensure_skeleton_oriented_bbox(loaded)
+        ensure_skeleton_axis_aligned_bbox(loaded)
     return loaded
 
 

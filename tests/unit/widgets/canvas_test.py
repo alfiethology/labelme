@@ -149,27 +149,13 @@ def test_bounded_move_skeleton_corner_stretches_all_keypoints(
 
 
 @pytest.mark.gui
-def test_drag_skeleton_rotation_handle_rotates_box_and_keypoints(
-    canvas: Canvas,
-) -> None:
+def test_skeleton_has_no_rotation_handle(canvas: Canvas) -> None:
     shape = _make_skeleton()
-    original = shape.points.copy()
     canvas.load_shapes(shapes=[shape])
-    canvas.hovered_shape = shape
-    canvas._hovered_rotation = 0
-    canvas._capture_rotation_anchors()
 
-    center = np.array([40.0, 25.0])
-    initial_handle = np.array([40.0, -14.0])
-    quarter_turn_handle = center + np.array(
-        [-(initial_handle - center)[1], initial_handle[0] - center[0]]
-    )
-    canvas._drag_hovered_rotation_point(pos=QPointF(*quarter_turn_handle))
+    canvas._refresh_hover_state(pos=QPointF(40, -14))
 
-    expected = center + np.column_stack(
-        (-(original - center)[:, 1], (original - center)[:, 0])
-    )
-    np.testing.assert_allclose(shape.points, expected, atol=1e-12)
+    assert canvas._hovered_rotation is None
 
 
 @pytest.mark.gui

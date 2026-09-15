@@ -7,7 +7,7 @@
 > adds:
 >
 > - animal pose annotation with reusable skeleton templates, keypoint visibility,
->   rotation and YOLO pose export;
+>   fixed-orientation bounding boxes and YOLO pose export;
 > - custom Ultralytics YOLO inference plus review-and-refine workflows for image
 >   directories and sampled video frames; and
 > - faster manual annotation through point snapping, streamlined point editing,
@@ -59,7 +59,7 @@ releases and community support. Issues concerning the features described under
 
 - Draw named skeleton keypoints and connect them into bones.
 - Mark individual keypoints as visible, occluded or missing.
-- Move, resize and rotate complete skeletons while retaining editable joints.
+- Move and resize complete skeletons while retaining editable joints.
 - Save skeleton layouts as reusable `.skeleton.json` templates.
 - Export annotated directories as Ultralytics-compatible YOLO pose datasets.
 
@@ -280,8 +280,8 @@ A skeleton is a set of named points, such as `nose`, `left_eye`, and
    optional: leave it empty if you do not need it. Otherwise, enter pairs such
    as `left_eye,right_eye`, one pair per line.
 1. Adjust the finished skeleton if needed. Drag a point to move just that
-   point, drag a box corner to resize the whole skeleton, or drag the round
-   handle above the box to rotate it.
+   point, or drag a box corner to resize the whole skeleton. Skeleton bounding
+   boxes remain axis-aligned to match YOLO pose labels.
 1. Save the annotation with **File > Save** (Ctrl+S). Auto Save is on by
    default, so Labelme will normally save it as soon as you finish drawing.
 
