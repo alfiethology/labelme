@@ -145,6 +145,21 @@ def test_quick_skeleton_emits_completed_bounding_box(canvas: Canvas) -> None:
     assert (bottom_right.x(), bottom_right.y()) == (70.0, 50.0)
 
 
+@pytest.mark.gui
+def test_skeleton_display_sizes_are_independent_from_other_vertices(
+    canvas: Canvas,
+) -> None:
+    canvas.set_point_size(8)
+    canvas.set_skeleton_node_size(14)
+    canvas.set_skeleton_node_label_size(18)
+
+    context = canvas._render_context(_make_skeleton(), highlighted=False)
+
+    assert context.point_size == 8
+    assert context.skeleton_node_size == 14
+    assert context.skeleton_node_label_size == 18
+
+
 def _make_oriented_rectangle(corners: list[tuple[float, float]]) -> Shape:
     return Shape(
         shape_type="oriented_rectangle",
@@ -410,6 +425,21 @@ def test_should_draw_crosshair_off_image_when_out_of_bounds_allowed(
     canvas.set_editing(False)
 
     assert canvas._should_draw_crosshair(cursor=QPointF(_WIDTH + 20, _HEIGHT + 20))
+
+
+@pytest.mark.gui
+def test_quick_skeleton_crosshair_appears_only_for_bounding_box(
+    canvas: Canvas,
+) -> None:
+    canvas._crosshair["rectangle"] = True
+    canvas.start_skeleton_drawing(node_names=("snout",))
+
+    assert not canvas._should_draw_crosshair(cursor=QPointF(20, 20))
+
+    canvas.add_skeleton_node(name="snout", point=QPointF(20, 20))
+
+    assert canvas.skeleton_drawing_mode == "bbox"
+    assert canvas._should_draw_crosshair(cursor=QPointF(40, 40))
 
 
 @pytest.mark.gui

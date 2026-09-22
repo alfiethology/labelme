@@ -291,6 +291,8 @@ class Canvas(QtWidgets.QWidget):
         self._color_resolver: Callable[[str], tuple[int, int, int]] | None = None
         self._point_size: int = 8
         self._point_type: Literal["square", "round"] = "round"
+        self._skeleton_node_size = 8
+        self._skeleton_node_label_size = 9
         self._draft_palette = _DEFAULT_PALETTE
         self._palette_cache = {}
         self._skeleton_drawing_mode: _SkeletonDrawingMode | None = None
@@ -348,6 +350,22 @@ class Canvas(QtWidgets.QWidget):
     def set_point_size(self, point_size: int) -> None:
         self._point_size = point_size
 
+    @property
+    def skeleton_node_size(self) -> int:
+        return self._skeleton_node_size
+
+    def set_skeleton_node_size(self, size: int) -> None:
+        self._skeleton_node_size = size
+        self.update()
+
+    @property
+    def skeleton_node_label_size(self) -> int:
+        return self._skeleton_node_label_size
+
+    def set_skeleton_node_label_size(self, size: int) -> None:
+        self._skeleton_node_label_size = size
+        self.update()
+
     def _resolve_palette(self, label: str | None) -> Palette:
         if label is None or self._color_resolver is None:
             return _DEFAULT_PALETTE
@@ -390,6 +408,8 @@ class Canvas(QtWidgets.QWidget):
             highlight=self._highlight if highlighted else None,
             rotation_highlight=self._rotation_highlight if highlighted else None,
             show_label=self._show_labels,
+            skeleton_node_size=self._skeleton_node_size,
+            skeleton_node_label_size=self._skeleton_node_label_size,
         )
 
     def _draft_render_context(
@@ -409,6 +429,8 @@ class Canvas(QtWidgets.QWidget):
             fill=fill,
             highlight=highlight,
             rotation_highlight=rotation_highlight,
+            skeleton_node_size=self._skeleton_node_size,
+            skeleton_node_label_size=self._skeleton_node_label_size,
         )
 
     @property
@@ -2070,7 +2092,9 @@ class Canvas(QtWidgets.QWidget):
             ):
                 center = point * self.scale
                 selected = index == self._skeleton_edge_start
-                radius = 7.0 if selected else 5.0
+                radius = self._skeleton_node_size / 2
+                if selected:
+                    radius *= 1.4
                 painter.setBrush(
                     self._draft_palette.hvertex_fill
                     if selected
@@ -2079,8 +2103,13 @@ class Canvas(QtWidgets.QWidget):
                 painter.drawEllipse(center, radius, radius)
                 paint_skeleton_node_name(
                     painter=painter,
-                    anchor=center + QPointF(8, -8),
+                    anchor=center
+                    + QPointF(
+                        self._skeleton_node_size / 2 + 2,
+                        -self._skeleton_node_size / 2,
+                    ),
                     name=name,
+                    font_size=self._skeleton_node_label_size,
                 )
         finally:
             painter.restore()
@@ -2174,7 +2203,13 @@ class Canvas(QtWidgets.QWidget):
     def _should_draw_crosshair(self, cursor: QPointF | None) -> bool:
         if self.mode != _CanvasMode.CREATE:
             return False
-        if not self._crosshair[self._create_mode]:
+        if self.is_drawing_skeleton:
+            enabled = (
+                self._skeleton_drawing_mode == "bbox" and self._crosshair["rectangle"]
+            )
+        else:
+            enabled = self._crosshair[self._create_mode]
+        if not enabled:
             return False
         if cursor is None:
             return False
@@ -2208,6 +2243,8 @@ class Canvas(QtWidgets.QWidget):
                 highlight=None,
                 rotation_highlight=None,
                 show_label=self._show_labels,
+                skeleton_node_size=self._skeleton_node_size,
+                skeleton_node_label_size=self._skeleton_node_label_size,
             )
             render_shape(painter=painter, shape=copy_shape, context=context)
 

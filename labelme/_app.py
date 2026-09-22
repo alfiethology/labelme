@@ -1058,6 +1058,16 @@ class MainWindow(QtWidgets.QMainWindow):
                         "Mark a skeleton keypoint missing, occluded, or visible"
                     ),
                 ),
+                action(
+                    self.tr("Set Node Marker Size…"),
+                    self._set_skeleton_node_marker_size,
+                    tip=self.tr("Choose the displayed skeleton-node diameter"),
+                ),
+                action(
+                    self.tr("Set Node Label Size…"),
+                    self._set_skeleton_node_label_size,
+                    tip=self.tr("Choose the displayed skeleton-node label size"),
+                ),
                 None,
                 action(
                     self.tr("Export YOLO Pose Dataset…"),
@@ -1196,6 +1206,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._finish_skeleton_drawing_ui()
         self._insert_shapes([shape])
         self._switch_canvas_mode(edit=True)
+        self._save_skeleton_template(shape)
 
     def _prompt_skeleton_flip_idx(
         self, *, names: tuple[str, ...]
@@ -1461,10 +1472,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tr("Select exactly one skeleton to save as a template."),
             )
             return
+        self._save_skeleton_template(selected[0])
+
+    def _save_skeleton_template(self, shape: Shape) -> None:
         filename, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
             self.tr("Save Skeleton Template"),
-            f"{selected[0].label or 'skeleton'}.skeleton.json",
+            f"{shape.label or 'skeleton'}.skeleton.json",
             self.tr("Skeleton templates (*.skeleton.json)"),
         )
         if not filename:
@@ -1472,7 +1486,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not filename.lower().endswith(".skeleton.json"):
             filename += ".skeleton.json"
         try:
-            skeleton = skeleton_template_from_shape(selected[0])
+            skeleton = skeleton_template_from_shape(shape)
             write_skeleton_file(filename, skeleton=skeleton)
             self._remember_skeleton_template(filename)
         except (OSError, TypeError, ValueError) as error:
@@ -1480,6 +1494,38 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tr("Error saving skeleton template"),
                 self.tr("<b>%s</b>") % error,
             )
+
+    def _set_skeleton_node_marker_size(self) -> None:
+        canvas = self._canvas_widgets.canvas
+        size, accepted = QtWidgets.QInputDialog.getInt(
+            self,
+            self.tr("Skeleton Node Marker Size"),
+            self.tr("Marker diameter (pixels):"),
+            canvas.skeleton_node_size,
+            2,
+            40,
+            1,
+        )
+        if not accepted:
+            return
+        canvas.set_skeleton_node_size(size)
+        self._window_state.setValue("pose/nodeMarkerSize", size)
+
+    def _set_skeleton_node_label_size(self) -> None:
+        canvas = self._canvas_widgets.canvas
+        size, accepted = QtWidgets.QInputDialog.getInt(
+            self,
+            self.tr("Skeleton Node Label Size"),
+            self.tr("Label size (pixels):"),
+            canvas.skeleton_node_label_size,
+            6,
+            48,
+            1,
+        )
+        if not accepted:
+            return
+        canvas.set_skeleton_node_label_size(size)
+        self._window_state.setValue("pose/nodeLabelSize", size)
 
     def _set_skeleton_keypoint_visibility(self) -> None:
         selected = self._canvas_widgets.canvas.selected_shapes
@@ -2124,6 +2170,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self._recent_skeleton_template_paths = _normalize_recent_skeleton_paths(
             self._window_state.value("pose/recentSkeletonTemplates", [])
         )
+        self._canvas_widgets.canvas.set_skeleton_node_size(
+            cast(
+                int,
+                self._window_state.value(
+                    "pose/nodeMarkerSize",
+                    self._config["shape"]["point_size"],
+                    type=int,
+                ),
+            )
+        )
+        self._canvas_widgets.canvas.set_skeleton_node_label_size(
+            cast(
+                int,
+                self._window_state.value("pose/nodeLabelSize", 9, type=int),
+            )
+        )
         #
         # Bump this when dock/toolbar layout changes to reset window state
         # for users upgrading from an older version.
@@ -2181,6 +2243,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ],
         )
         canvas.set_point_size(self._config["shape"]["point_size"])
+        canvas.set_skeleton_node_size(self._config["shape"]["point_size"])
         canvas.set_show_labels(self._config["shape"]["show_labels"])
         canvas.set_draft_palette(self._draft_palette_from_config())
         canvas.set_color_resolver(

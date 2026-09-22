@@ -21,7 +21,6 @@ from .._shape import oriented_rectangle_arrow_points
 
 PEN_WIDTH: Final[int] = 2
 SKELETON_NODE_LABEL_FONT_SIZE: Final[int] = 9
-SKELETON_NODE_LABEL_OFFSET: Final[QtCore.QPointF] = QtCore.QPointF(6, -4)
 SKELETON_NODE_LABEL_COLOR: Final[QtGui.QColor] = QtGui.QColor(255, 235, 0)
 SKELETON_NODE_LABEL_OUTLINE_COLOR: Final[QtGui.QColor] = QtGui.QColor(0, 0, 0)
 SKELETON_NODE_LABEL_OUTLINE_WIDTH: Final[float] = 1.0
@@ -83,6 +82,8 @@ class ShapeRenderContext:
     highlight: VertexHighlight | None
     rotation_highlight: VertexHighlight | None
     show_label: bool = False
+    skeleton_node_size: int = 8
+    skeleton_node_label_size: int = SKELETON_NODE_LABEL_FONT_SIZE
 
 
 def render_shape(
@@ -130,21 +131,30 @@ def _paint_skeleton_node_labels(
     for name, point in zip(names, keypoints, strict=True):
         if isinstance(name, str) and name:
             anchor = QtCore.QPointF(*(point * context.scale))
+            offset = QtCore.QPointF(
+                context.skeleton_node_size / 2 + 2,
+                -context.skeleton_node_size / 2,
+            )
             paint_skeleton_node_name(
                 painter=painter,
-                anchor=anchor + SKELETON_NODE_LABEL_OFFSET,
+                anchor=anchor + offset,
                 name=name,
+                font_size=context.skeleton_node_label_size,
             )
 
 
 def paint_skeleton_node_name(
-    *, painter: QtGui.QPainter, anchor: QtCore.QPointF, name: str
+    *,
+    painter: QtGui.QPainter,
+    anchor: QtCore.QPointF,
+    name: str,
+    font_size: int = SKELETON_NODE_LABEL_FONT_SIZE,
 ) -> None:
     """Paint a small high-contrast node name at a screen-space anchor."""
     if not name:
         return
     font = QtGui.QFont(painter.font())
-    font.setPixelSize(SKELETON_NODE_LABEL_FONT_SIZE)
+    font.setPixelSize(font_size)
     text_path = QtGui.QPainterPath()
     text_path.addText(anchor, font, name)
 
@@ -314,11 +324,12 @@ def _build_shape_point_path(
     shape: Shape,
     context: ShapeRenderContext,
     vertex_index: int,
+    default_size: int | None = None,
 ) -> None:
     size, point_type = _resolve_vertex_style(
         highlight=context.highlight,
         vertex_index=vertex_index,
-        default_size=context.point_size,
+        default_size=context.point_size if default_size is None else default_size,
         default_point_type=context.point_type,
     )
     pos = QtCore.QPointF(*(shape.points[vertex_index] * context.scale))
@@ -502,7 +513,7 @@ def _build_shape_points_paths(
                 size, _ = _resolve_vertex_style(
                     highlight=context.highlight,
                     vertex_index=vertex_index,
-                    default_size=context.point_size,
+                    default_size=context.skeleton_node_size,
                     default_point_type=context.point_type,
                 )
                 _draw_missing_vertex(
@@ -521,6 +532,7 @@ def _build_shape_points_paths(
                 shape=shape,
                 context=context,
                 vertex_index=vertex_index,
+                default_size=context.skeleton_node_size,
             )
     else:
         paths.line.moveTo(QtCore.QPointF(*(points[0] * scale)))

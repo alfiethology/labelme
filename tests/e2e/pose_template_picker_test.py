@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import numpy as np
+import pytest
 from PySide6 import QtCore
 
 from labelme._app import MainWindow
@@ -89,3 +91,23 @@ def test_quick_draw_places_nodes_in_template_order_then_uses_drawn_box(
     shape = raw_win._canvas_widgets.canvas.shapes[-1]
     assert shape.other_data["pose"]["keypoints"] == ["snout", "tail_base"]
     np.testing.assert_array_equal(shape.points[4:], [[30, 30], [70, 60]])
+
+
+def test_finishing_new_skeleton_prompts_to_save_template(
+    raw_win: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_template = Mock()
+    monkeypatch.setattr(raw_win, "_save_skeleton_template", save_template)
+    monkeypatch.setattr(
+        raw_win, "_prompt_skeleton_flip_idx", lambda *, names: tuple(range(len(names)))
+    )
+    raw_win._skeleton_drawing_label = "rat"
+    raw_win._canvas_widgets.canvas.start_skeleton_drawing()
+    raw_win._canvas_widgets.canvas.add_skeleton_node(
+        name="snout", point=QtCore.QPointF(30, 30)
+    )
+
+    raw_win._finish_skeleton_drawing()
+
+    save_template.assert_called_once()
+    assert save_template.call_args.args[0].label == "rat"
