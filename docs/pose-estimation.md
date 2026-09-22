@@ -8,20 +8,20 @@ the [Ultralytics YOLO pose dataset format](https://docs.ultralytics.com/datasets
 
 1. Open an image and choose **Pose > Draw Skeleton…**, then enter the animal
    class Label.
-2. Keep **Place Nodes** selected. Click each joint on the animal and name it in
+1. Keep **Place Nodes** selected. Click each joint on the animal and name it in
    the dialog that appears. Click order becomes the keypoint order in YOLO
    exports.
-3. Select **Connect Nodes**, then click the two endpoints of each bone. Clicking
+1. Select **Connect Nodes**, then click the two endpoints of each bone. Clicking
    an already-connected pair removes that bone.
-4. Use **Undo Step** to remove the most recently placed node or bone when
+1. Use **Undo Step** to remove the most recently placed node or bone when
    needed.
-5. Select **Finish Skeleton** (or press Enter/Space). Optionally enter horizontal
+1. Select **Finish Skeleton** (or press Enter/Space). Optionally enter horizontal
    mirror pairs such as `left_eye,right_eye`, one pair per line. Press Escape or
    select **Cancel** to discard the draft.
-6. Labelme creates a fixed-orientation bounding box around the nodes. Drag a
-   corner to stretch the whole pose: the box, joints, and bones scale together.
+1. Labelme creates a fixed-orientation bounding box around the nodes. Drag a
+   box corner to adjust only the box; the joints and bones stay stationary.
    Drag an individual joint to refine just that joint.
-7. Right-click a keypoint and choose its visibility from the menu beside the
+1. Right-click a keypoint and choose its visibility from the menu beside the
    cursor. Alternatively, select one Skeleton Shape and use
    **Pose > Set Keypoint Visibility…**. Choose
    **Occluded (1)** when the joint is hidden but its position can still be
@@ -29,10 +29,17 @@ the [Ultralytics YOLO pose dataset format](https://docs.ultralytics.com/datasets
    lies outside the image. Occluded joints are shown in red. Missing joints use
    a grey crossed marker so they can still be right-clicked, while their
    connected bones are hidden. Choose **Visible (2)** to restore one.
-8. With the Skeleton Shape selected, choose
+1. With the Skeleton Shape selected, choose
    **Pose > Save Selected Skeleton As Template…**.
-9. On another image, choose **Pose > Place Skeleton From File…**, then adjust
+1. On another image, choose **Pose > Place Skeleton From File…**, then adjust
    the box and joints for that animal.
+
+To change a template itself, choose **Pose > Edit Skeleton Template…**. Labelme
+displays the template on the current image and opens the skeleton toolbar. Use
+**Place Nodes**, **Connect Nodes**, or **Rename Nodes** to edit it. When the
+layout is ready, choose **Finish Skeleton** to add it to the annotation and
+overwrite the template file that was opened. **Rename Nodes** is also available
+while drawing a new skeleton.
 
 After a template has been opened or saved once, Labelme remembers it. Click
 **Skeleton** in the left-hand shape toolbar to open a menu of remembered

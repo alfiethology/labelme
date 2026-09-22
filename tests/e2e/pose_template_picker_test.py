@@ -72,6 +72,45 @@ def test_placed_skeleton_uses_small_centered_default(
     )
 
 
+def test_edit_skeleton_template_uses_drawing_toolbar_and_finish_saves(
+    raw_win: MainWindow, tmp_path: Path
+) -> None:
+    path = tmp_path / "rat.skeleton.json"
+    _write_rat_template(path)
+
+    raw_win._edit_skeleton_template_from_file(str(path))
+
+    canvas = raw_win._canvas_widgets.canvas
+    assert canvas.is_drawing_skeleton
+    assert canvas.skeleton_drawing().names == ("snout", "tail_base")
+    assert raw_win._skeleton_drawing_toolbar.isVisible()
+    assert raw_win._skeleton_place_action.isEnabled()
+    assert raw_win._skeleton_connect_action.isEnabled()
+    assert raw_win._skeleton_rename_action.isEnabled()
+    assert raw_win._editing_skeleton_template_path == str(path.resolve())
+    canvas.set_skeleton_drawing_mode("rename")
+    canvas.rename_skeleton_node(index=0, name="nose")
+    canvas.set_skeleton_drawing_mode("nodes")
+    left, top, right, bottom = raw_win._editing_skeleton_bounds or (0, 0, 0, 0)
+    canvas._move_skeleton_draft_node(
+        index=0,
+        pos=QtCore.QPointF(
+            left + (right - left) * 0.25,
+            top + (bottom - top) * 0.75,
+        ),
+    )
+
+    raw_win._finish_skeleton_drawing()
+
+    saved = read_skeleton_file(path)
+    assert saved.keypoints == ("nose", "tail_base")
+    assert saved.positions[0].tolist() == pytest.approx([0.25, 0.75])
+    assert canvas.shapes[-1].other_data["pose"]["keypoints"] == [
+        "nose",
+        "tail_base",
+    ]
+
+
 def test_quick_draw_places_nodes_in_template_order_then_uses_drawn_box(
     raw_win: MainWindow, tmp_path: Path
 ) -> None:

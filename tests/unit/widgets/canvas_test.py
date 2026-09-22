@@ -90,6 +90,61 @@ def test_interactive_skeleton_rejects_duplicate_node_name(canvas: Canvas) -> Non
 
 
 @pytest.mark.gui
+def test_interactive_skeleton_renames_nodes_and_undoes(canvas: Canvas) -> None:
+    canvas.start_skeleton_drawing()
+    canvas.add_skeleton_node(name="snout", point=QPointF(10, 10))
+    canvas.set_skeleton_drawing_mode("rename")
+
+    canvas.rename_skeleton_node(index=0, name="nose")
+    assert canvas.skeleton_drawing().names == ("nose",)
+
+    canvas.undo_skeleton_step()
+    assert canvas.skeleton_drawing().names == ("snout",)
+
+
+@pytest.mark.gui
+def test_editing_draft_undo_does_not_remove_template_nodes(canvas: Canvas) -> None:
+    canvas.start_skeleton_drawing(
+        initial_names=("snout",),
+        initial_points=(QPointF(10, 10),),
+    )
+
+    canvas.undo_skeleton_step()
+
+    assert canvas.skeleton_drawing().names == ("snout",)
+
+
+@pytest.mark.gui
+def test_editing_draft_can_move_template_nodes(canvas: Canvas) -> None:
+    canvas.start_skeleton_drawing(
+        initial_names=("snout",),
+        initial_points=(QPointF(10, 10),),
+    )
+
+    canvas._move_skeleton_draft_node(index=0, pos=QPointF(30, 25))
+
+    point = canvas.skeleton_drawing().points[0]
+    assert (point.x(), point.y()) == (30.0, 25.0)
+
+
+@pytest.mark.gui
+def test_editing_draft_undo_restores_removed_template_edge(canvas: Canvas) -> None:
+    canvas.start_skeleton_drawing(
+        initial_names=("snout", "tail"),
+        initial_points=(QPointF(10, 10), QPointF(40, 20)),
+        edges=((0, 1),),
+    )
+    canvas.set_skeleton_drawing_mode("edges")
+    canvas._select_skeleton_edge_endpoint(pos=QPointF(10, 10))
+    canvas._select_skeleton_edge_endpoint(pos=QPointF(40, 20))
+    assert canvas.skeleton_drawing().edges == ()
+
+    canvas.undo_skeleton_step()
+
+    assert canvas.skeleton_drawing().edges == ((0, 1),)
+
+
+@pytest.mark.gui
 def test_take_interactive_skeleton_clears_drawing_state(canvas: Canvas) -> None:
     canvas.start_skeleton_drawing()
     canvas.add_skeleton_node(name="snout", point=QPointF(10, 10))
@@ -182,7 +237,7 @@ def _make_skeleton() -> Shape:
 
 
 @pytest.mark.gui
-def test_bounded_move_skeleton_corner_stretches_all_keypoints(
+def test_bounded_move_skeleton_corner_leaves_keypoints_stationary(
     canvas: Canvas,
 ) -> None:
     shape = _make_skeleton()
@@ -194,7 +249,7 @@ def test_bounded_move_skeleton_corner_stretches_all_keypoints(
     np.testing.assert_allclose(
         shape.points[:4], [(10, 10), (90, 10), (90, 45), (10, 45)]
     )
-    np.testing.assert_allclose(shape.points[4:], [(70, 18.75), (30, 36.25)])
+    np.testing.assert_allclose(shape.points[4:], [(55, 17.5), (25, 32.5)])
 
 
 @pytest.mark.gui

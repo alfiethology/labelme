@@ -69,7 +69,7 @@ See [Animal pose annotation](docs/pose-estimation.md) for the complete workflow.
 
 - Load a custom Ultralytics `.pt` model and run it on the current image.
 - Pre-label a directory, review predicted shapes and save only corrected frames.
-- Sample every _n_th frame from a video, skip easy frames and retain difficult or
+- Sample every \_n_th frame from a video, skip easy frames and retain difficult or
   corrected examples as images with Labelme JSON annotations.
 - Configure the model confidence threshold directly in the toolbar.
 
@@ -276,14 +276,16 @@ A skeleton is a set of named points, such as `nose`, `left_eye`, and
    export.
 1. Select **Connect Nodes**. Click one point and then another to draw a bone
    between them. Repeat for the other bones.
+1. To correct a name, select **Rename Nodes** and click the node to rename.
 1. Select **Finish Skeleton**, or press Enter or Space. The mirror-pairs box is
    optional: leave it empty if you do not need it. Otherwise, enter pairs such
    as `left_eye,right_eye`, one pair per line. A file browser then asks where
    to save the new reusable `.skeleton.json` template. Cancelling this browser
    keeps the skeleton annotation but skips saving the template.
 1. Adjust the finished skeleton if needed. Drag a point to move just that
-   point, or drag a box corner to resize the whole skeleton. Skeleton bounding
-   boxes remain axis-aligned to match YOLO pose labels.
+   point, or drag a box corner to adjust only the box while the keypoints stay
+   stationary. Skeleton bounding boxes remain axis-aligned to match YOLO pose
+   labels.
 1. Save the annotation with **File > Save** (Ctrl+S). Auto Save is on by
    default, so Labelme will normally save it as soon as you finish drawing.
 
@@ -301,6 +303,12 @@ The annotation file and a skeleton template are different:
   finished skeleton and choose **Pose > Save Selected Skeleton As Template…**.
   On another image, use **Pose > Place Skeleton From File…**, then move its
   points onto the new animal.
+
+To revise an existing template, choose **Pose > Edit Skeleton Template…** and
+open its `.skeleton.json` file. Labelme displays it on the current image and
+opens the skeleton toolbar. Use **Place Nodes**, **Connect Nodes**, or
+**Rename Nodes**, then select **Finish Skeleton** to add the result to the
+annotation and write the changed layout back to the same template file.
 
 ### Quick-draw skeleton annotations
 

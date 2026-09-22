@@ -54,6 +54,7 @@ from ._pose import ensure_skeleton_axis_aligned_bbox
 from ._pose import make_skeleton_shape
 from ._pose import make_skeleton_shape_from_nodes
 from ._pose import read_skeleton_file
+from ._pose import skeleton_shape_parts
 from ._pose import skeleton_template_from_shape
 from ._pose import write_skeleton_file
 from ._pose_export import export_yolo_pose_dataset
@@ -225,6 +226,9 @@ class MainWindow(QtWidgets.QMainWindow):
     _default_state: QtCore.QByteArray
     _recent_skeleton_template_paths: list[str]
     _quick_skeleton_template: SkeletonTemplate | None
+    _editing_skeleton_template_path: str | None
+    _editing_skeleton_template: SkeletonTemplate | None
+    _editing_skeleton_bounds: tuple[float, float, float, float] | None
 
     def __init__(
         self,
@@ -240,6 +244,9 @@ class MainWindow(QtWidgets.QMainWindow):
             config_file=config_file, config_overrides=config_overrides
         )
         self._config_overrides = config_overrides or {}
+        self._editing_skeleton_template_path = None
+        self._editing_skeleton_template = None
+        self._editing_skeleton_bounds = None
 
         self._shape_clipboard = ShapeClipboard(self)
 
@@ -1046,6 +1053,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     tip=self.tr("Load a skeleton template and place it on the image"),
                 ),
                 action(
+                    self.tr("Edit Skeleton Template…"),
+                    self._edit_skeleton_template,
+                    tip=self.tr("Load a skeleton template onto this image for editing"),
+                ),
+                action(
                     self.tr("Save Selected Skeleton As Template…"),
                     self._save_selected_skeleton_template,
                     tip=self.tr("Save the selected skeleton for reuse"),
@@ -1172,18 +1184,41 @@ class MainWindow(QtWidgets.QMainWindow):
             )
 
     def _set_skeleton_drawing_mode(self, mode: str) -> None:
-        if mode not in ("nodes", "edges"):
+        if mode not in ("nodes", "edges", "rename"):
             raise ValueError(f"unexpected skeleton drawing mode: {mode!r}")
         if mode == "nodes":
             self._canvas_widgets.canvas.set_skeleton_drawing_mode("nodes")
-        else:
+        elif mode == "edges":
             self._canvas_widgets.canvas.set_skeleton_drawing_mode("edges")
+        else:
+            self._canvas_widgets.canvas.set_skeleton_drawing_mode("rename")
+
+    def _rename_skeleton_node(self, index: int) -> None:
+        canvas = self._canvas_widgets.canvas
+        drawing = canvas.skeleton_drawing()
+        name, accepted = QtWidgets.QInputDialog.getText(
+            self,
+            self.tr("Rename Skeleton Node"),
+            self.tr("Node name:"),
+            text=drawing.names[index],
+        )
+        if not accepted:
+            return
+        try:
+            canvas.rename_skeleton_node(index=index, name=name)
+        except (IndexError, ValueError) as error:
+            self.show_error_message(
+                self.tr("Invalid node name"), self.tr("<b>%s</b>") % error
+            )
 
     def _finish_skeleton_drawing(self) -> None:
         canvas = self._canvas_widgets.canvas
         if not canvas.is_drawing_skeleton:
             return
         if canvas.skeleton_drawing_mode == "bbox":
+            return
+        if self._editing_skeleton_template is not None:
+            self._finish_edited_skeleton()
             return
         drawing = canvas.skeleton_drawing()
         if not drawing.points:
@@ -1254,8 +1289,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._skeleton_drawing_toolbar.hide()
         self._skeleton_drawing_label = ""
         self._quick_skeleton_template = None
+        self._editing_skeleton_template_path = None
+        self._editing_skeleton_template = None
+        self._editing_skeleton_bounds = None
         self._skeleton_place_action.setEnabled(True)
         self._skeleton_connect_action.setEnabled(True)
+        self._skeleton_rename_action.setEnabled(True)
         self._skeleton_finish_action.setEnabled(True)
 
     def _on_skeleton_drawing_cancelled(self) -> None:
@@ -1278,6 +1317,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._skeleton_place_action.setChecked(True)
         self._skeleton_place_action.setEnabled(False)
         self._skeleton_connect_action.setEnabled(False)
+        self._skeleton_rename_action.setEnabled(False)
         self._skeleton_finish_action.setEnabled(False)
         self._skeleton_drawing_toolbar.show()
 
@@ -1340,6 +1380,101 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._remember_skeleton_template(filename)
         self._place_skeleton(skeleton)
+
+    def _edit_skeleton_template(self) -> None:
+        if self._image.isNull():
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Edit Skeleton Template"),
+                self.tr("Open an image before editing a skeleton template."),
+            )
+            return
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("Edit Skeleton Template"),
+            str(Path(self._image_path).parent) if self._image_path else "",
+            self.tr("Skeleton templates (*.skeleton.json);;JSON files (*.json)"),
+        )
+        if not filename:
+            return
+        self._edit_skeleton_template_from_file(filename)
+
+    def _edit_skeleton_template_from_file(self, filename: str) -> None:
+        try:
+            skeleton = read_skeleton_file(filename)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+            self.show_error_message(
+                self.tr("Error loading skeleton template"),
+                self.tr("<b>%s</b>") % error,
+            )
+            return
+        self._remember_skeleton_template(filename)
+        width = self._image.width()
+        height = self._image.height()
+        bounds = (width * 0.4, height * 0.4, width * 0.6, height * 0.6)
+        shape = make_skeleton_shape(skeleton=skeleton, bounds=bounds)
+        bbox, keypoints = skeleton_shape_parts(shape=shape)
+        self._editing_skeleton_template_path = str(Path(filename).resolve())
+        self._editing_skeleton_template = skeleton
+        self._editing_skeleton_bounds = bounds
+        self._skeleton_drawing_label = skeleton.label
+        self._canvas_widgets.canvas.start_skeleton_drawing(
+            initial_names=skeleton.keypoints,
+            initial_points=tuple(QtCore.QPointF(*point) for point in keypoints),
+            edges=skeleton.edges,
+            bbox=tuple(QtCore.QPointF(*point) for point in bbox),
+        )
+        self._skeleton_place_action.setChecked(True)
+        self._skeleton_drawing_toolbar.show()
+        self.show_status_message(
+            self.tr("Editing %s — use Finish Skeleton to save") % Path(filename).name,
+            8000,
+        )
+
+    def _finish_edited_skeleton(self) -> None:
+        filename = self._editing_skeleton_template_path
+        template = self._editing_skeleton_template
+        bounds = self._editing_skeleton_bounds
+        if filename is None or template is None or bounds is None:
+            return
+        canvas = self._canvas_widgets.canvas
+        drawing = canvas.skeleton_drawing()
+        points = np.array([[point.x(), point.y()] for point in drawing.points])
+        left, top, right, bottom = bounds
+        left = min(left, float(points[:, 0].min()))
+        top = min(top, float(points[:, 1].min()))
+        right = max(right, float(points[:, 0].max()))
+        bottom = max(bottom, float(points[:, 1].max()))
+        flip_idx = (
+            *template.flip_idx,
+            *range(len(template.keypoints), len(drawing.names)),
+        )
+        try:
+            shape = make_skeleton_shape_from_nodes(
+                label=template.label,
+                keypoints=drawing.names,
+                points=points,
+                edges=drawing.edges,
+                flip_idx=flip_idx,
+                bounds=(left, top, right, bottom),
+            )
+            skeleton = skeleton_template_from_shape(shape)
+            write_skeleton_file(filename, skeleton=skeleton)
+            self._remember_skeleton_template(filename)
+        except (OSError, TypeError, ValueError) as error:
+            self.show_error_message(
+                self.tr("Error saving skeleton template"),
+                self.tr("<b>%s</b>") % error,
+            )
+            return
+        canvas.take_skeleton_drawing()
+        self._finish_skeleton_drawing_ui()
+        self._insert_shapes([shape])
+        self._switch_canvas_mode(edit=True)
+        self.show_status_message(
+            self.tr("Saved skeleton template: %s") % filename,
+            5000,
+        )
 
     def _choose_skeleton_to_place(self) -> None:
         if self._image.isNull():
@@ -1453,7 +1588,7 @@ class MainWindow(QtWidgets.QMainWindow):
             "pose/recentSkeletonTemplates", self._recent_skeleton_template_paths
         )
 
-    def _place_skeleton(self, skeleton: SkeletonTemplate) -> None:
+    def _place_skeleton(self, skeleton: SkeletonTemplate) -> Shape:
         width = self._image.width()
         height = self._image.height()
         shape = make_skeleton_shape(
@@ -1462,6 +1597,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._insert_shapes([shape])
         self._switch_canvas_mode(edit=True)
+        return shape
 
     def _save_selected_skeleton_template(self) -> None:
         selected = self._canvas_widgets.canvas.selected_shapes
@@ -1645,14 +1781,21 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Click two nodes to add or remove a bone"),
             checkable=True,
         )
+        self._skeleton_rename_action = action(
+            self.tr("Rename Nodes"),
+            lambda: self._set_skeleton_drawing_mode("rename"),
+            tip=self.tr("Click a skeleton node to change its name"),
+            checkable=True,
+        )
         skeleton_mode_group = QtGui.QActionGroup(self)
         skeleton_mode_group.setExclusive(True)
         skeleton_mode_group.addAction(self._skeleton_place_action)
         skeleton_mode_group.addAction(self._skeleton_connect_action)
+        skeleton_mode_group.addAction(self._skeleton_rename_action)
         skeleton_undo_action = action(
             self.tr("Undo Step"),
             self._canvas_widgets.canvas.undo_skeleton_step,
-            tip=self.tr("Remove the last node or bone from this skeleton draft"),
+            tip=self.tr("Undo the last node, bone, or node-name change"),
         )
         self._skeleton_finish_action = action(
             self.tr("Finish Skeleton"),
@@ -1669,6 +1812,7 @@ class MainWindow(QtWidgets.QMainWindow):
             actions=[
                 self._skeleton_place_action,
                 self._skeleton_connect_action,
+                self._skeleton_rename_action,
                 skeleton_undo_action,
                 None,
                 self._skeleton_finish_action,
@@ -1681,6 +1825,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._skeleton_drawing_toolbar.hide()
         canvas = self._canvas_widgets.canvas
         canvas.skeleton_node_requested.connect(self._name_skeleton_node)
+        canvas.skeleton_node_rename_requested.connect(self._rename_skeleton_node)
         canvas.skeleton_finish_requested.connect(self._finish_skeleton_drawing)
         canvas.skeleton_bbox_completed.connect(self._finish_quick_skeleton_drawing)
         canvas.skeleton_drawing_cancelled.connect(self._on_skeleton_drawing_cancelled)
