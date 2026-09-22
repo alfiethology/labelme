@@ -24,6 +24,25 @@ def _polygon(label: str | None) -> Shape:
     )
 
 
+def _skeleton(*, keypoint_names: list[str]) -> Shape:
+    return Shape(
+        label="hen",
+        shape_type="skeleton",
+        points=np.array(
+            [[20, 20], [180, 20], [180, 180], [20, 180], [80, 100], [120, 100]],
+            dtype=np.float64,
+        ),
+        closed=True,
+        other_data={
+            "pose": {
+                "keypoints": keypoint_names,
+                "edges": [],
+                "visibility": [2, 2],
+            }
+        },
+    )
+
+
 def _unit_square_polygon() -> Shape:
     return Shape(
         shape_type="polygon",
@@ -175,6 +194,32 @@ def test_point_shape_label_is_drawn(qapp: QtGui.QGuiApplication) -> None:
             bottom=_SIZE,
         )
         > 0
+    )
+
+
+@pytest.mark.gui
+def test_skeleton_node_names_are_always_drawn(qapp: QtGui.QGuiApplication) -> None:
+    named = _render(_skeleton(keypoint_names=["beak", "tail"]), show_label=False)
+    unnamed = _render(_skeleton(keypoint_names=["", ""]), show_label=False)
+
+    # Shape-label visibility does not control node names. Their pixels appear
+    # immediately above and to the right of the two keypoint markers.
+    differing_pixels = 0
+    for y in range(80, 101):
+        for x in range(80, 170):
+            if named.pixelColor(x, y) != unnamed.pixelColor(x, y):
+                differing_pixels += 1
+    assert differing_pixels > 0
+
+    assert any(
+        named.pixelColor(x, y) == QtGui.QColor(255, 235, 0)
+        for y in range(80, 101)
+        for x in range(80, 170)
+    )
+    assert any(
+        named.pixelColor(x, y) == QtGui.QColor(0, 0, 0)
+        for y in range(80, 101)
+        for x in range(80, 170)
     )
 
 

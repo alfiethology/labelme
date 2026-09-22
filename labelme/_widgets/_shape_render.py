@@ -20,6 +20,11 @@ from .._shape import nearest_edge_index
 from .._shape import oriented_rectangle_arrow_points
 
 PEN_WIDTH: Final[int] = 2
+SKELETON_NODE_LABEL_FONT_SIZE: Final[int] = 9
+SKELETON_NODE_LABEL_OFFSET: Final[QtCore.QPointF] = QtCore.QPointF(6, -4)
+SKELETON_NODE_LABEL_COLOR: Final[QtGui.QColor] = QtGui.QColor(255, 235, 0)
+SKELETON_NODE_LABEL_OUTLINE_COLOR: Final[QtGui.QColor] = QtGui.QColor(0, 0, 0)
+SKELETON_NODE_LABEL_OUTLINE_WIDTH: Final[float] = 1.0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -98,8 +103,61 @@ def render_shape(
     if len(shape.points) > 0:
         _paint_shape_points(painter=painter, shape=shape, context=context)
 
+    if shape.shape_type == "skeleton":
+        _paint_skeleton_node_labels(painter=painter, shape=shape, context=context)
+
     if context.show_label:
         _paint_shape_label(painter=painter, shape=shape, context=context)
+
+
+def _paint_skeleton_node_labels(
+    *,
+    painter: QtGui.QPainter,
+    shape: Shape,
+    context: ShapeRenderContext,
+) -> None:
+    try:
+        _, keypoints = skeleton_shape_parts(shape=shape)
+    except ValueError:
+        return
+    pose_data = shape.other_data.get(POSE_DATA_KEY)
+    if not isinstance(pose_data, dict):
+        return
+    names = pose_data.get("keypoints")
+    if not isinstance(names, list) or len(names) != len(keypoints):
+        return
+
+    for name, point in zip(names, keypoints, strict=True):
+        if isinstance(name, str) and name:
+            anchor = QtCore.QPointF(*(point * context.scale))
+            paint_skeleton_node_name(
+                painter=painter,
+                anchor=anchor + SKELETON_NODE_LABEL_OFFSET,
+                name=name,
+            )
+
+
+def paint_skeleton_node_name(
+    *, painter: QtGui.QPainter, anchor: QtCore.QPointF, name: str
+) -> None:
+    """Paint a small high-contrast node name at a screen-space anchor."""
+    if not name:
+        return
+    font = QtGui.QFont(painter.font())
+    font.setPixelSize(SKELETON_NODE_LABEL_FONT_SIZE)
+    text_path = QtGui.QPainterPath()
+    text_path.addText(anchor, font, name)
+
+    painter.save()
+    try:
+        outline = QtGui.QPen(SKELETON_NODE_LABEL_OUTLINE_COLOR)
+        outline.setWidthF(SKELETON_NODE_LABEL_OUTLINE_WIDTH)
+        outline.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(outline)
+        painter.setBrush(SKELETON_NODE_LABEL_COLOR)
+        painter.drawPath(text_path)
+    finally:
+        painter.restore()
 
 
 def _paint_shape_label(

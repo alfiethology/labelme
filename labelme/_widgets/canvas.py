@@ -37,6 +37,7 @@ from ._shape_render import ShapeRenderContext
 from ._shape_render import VertexHighlight
 from ._shape_render import bounds as _shape_bounds
 from ._shape_render import is_hit_by_point
+from ._shape_render import paint_skeleton_node_name
 from ._shape_render import render_shape
 from .download import download_ai_model
 
@@ -1986,7 +1987,11 @@ class Canvas(QtWidgets.QWidget):
                     else self._draft_palette.vertex_fill
                 )
                 painter.drawEllipse(center, radius, radius)
-                painter.drawText(center + QPointF(8, -8), name)
+                paint_skeleton_node_name(
+                    painter=painter,
+                    anchor=center + QPointF(8, -8),
+                    name=name,
+                )
         finally:
             painter.restore()
 
