@@ -148,6 +148,7 @@ class _Actions(NamedTuple):
     create_rectangle_mode: QtGui.QAction
     create_oriented_rectangle_mode: QtGui.QAction
     create_skeleton_mode: QtGui.QAction
+    create_quick_skeleton_mode: QtGui.QAction
     create_circle_mode: QtGui.QAction
     create_line_mode: QtGui.QAction
     create_point_mode: QtGui.QAction
@@ -223,6 +224,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _scroll_values: dict[Qt.Orientation, dict[str, float]]
     _default_state: QtCore.QByteArray
     _recent_skeleton_template_paths: list[str]
+    _quick_skeleton_template: SkeletonTemplate | None
 
     def __init__(
         self,
@@ -565,6 +567,13 @@ class MainWindow(QtWidgets.QMainWindow):
             tip=self.tr("Choose a remembered skeleton template to place"),
             enabled=False,
         )
+        create_quick_skeleton_mode = action(
+            text=self.tr("Quick-Draw Skeleton"),
+            slot=self._choose_skeleton_to_quick_draw,
+            icon="phosphor/line-segments.svg",
+            tip=self.tr("Place template keypoints in order, then draw the box"),
+            enabled=False,
+        )
         create_circle_mode = action(
             text=self.tr("Circle"),
             slot=lambda: self._switch_canvas_mode(edit=False, create_mode="circle"),
@@ -803,6 +812,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ("rectangle", create_rectangle_mode),
             ("oriented_rectangle", create_oriented_rectangle_mode),
             ("skeleton", create_skeleton_mode),
+            ("quick_skeleton", create_quick_skeleton_mode),
             ("circle", create_circle_mode),
             ("point", create_point_mode),
             ("line", create_line_mode),
@@ -824,6 +834,7 @@ class MainWindow(QtWidgets.QMainWindow):
             create_rectangle_mode,
             create_oriented_rectangle_mode,
             create_skeleton_mode,
+            create_quick_skeleton_mode,
             create_circle_mode,
             create_line_mode,
             create_point_mode,
@@ -888,6 +899,7 @@ class MainWindow(QtWidgets.QMainWindow):
             create_rectangle_mode=create_rectangle_mode,
             create_oriented_rectangle_mode=create_oriented_rectangle_mode,
             create_skeleton_mode=create_skeleton_mode,
+            create_quick_skeleton_mode=create_quick_skeleton_mode,
             create_circle_mode=create_circle_mode,
             create_line_mode=create_line_mode,
             create_point_mode=create_point_mode,
@@ -1022,6 +1034,13 @@ class MainWindow(QtWidgets.QMainWindow):
                     tip=self.tr("Place, name, and connect skeleton nodes on the image"),
                 ),
                 action(
+                    self.tr("Quick-Draw Skeleton…"),
+                    self._choose_skeleton_to_quick_draw,
+                    tip=self.tr(
+                        "Place predefined keypoints in order, then draw the box"
+                    ),
+                ),
+                action(
                     self.tr("Place Skeleton From File…"),
                     self._place_skeleton_from_file,
                     tip=self.tr("Load a skeleton template and place it on the image"),
@@ -1122,6 +1141,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self._skeleton_drawing_toolbar.show()
 
     def _name_skeleton_node(self, point: QtCore.QPointF) -> None:
+        predefined_name = self._canvas_widgets.canvas.next_skeleton_node_name
+        if predefined_name is not None:
+            self._canvas_widgets.canvas.add_skeleton_node(
+                name=predefined_name, point=point
+            )
+            return
         name, accepted = QtWidgets.QInputDialog.getText(
             self,
             self.tr("Name Skeleton Node"),
@@ -1147,6 +1172,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _finish_skeleton_drawing(self) -> None:
         canvas = self._canvas_widgets.canvas
         if not canvas.is_drawing_skeleton:
+            return
+        if canvas.skeleton_drawing_mode == "bbox":
             return
         drawing = canvas.skeleton_drawing()
         if not drawing.points:
@@ -1215,9 +1242,66 @@ class MainWindow(QtWidgets.QMainWindow):
     def _finish_skeleton_drawing_ui(self) -> None:
         self._skeleton_drawing_toolbar.hide()
         self._skeleton_drawing_label = ""
+        self._quick_skeleton_template = None
+        self._skeleton_place_action.setEnabled(True)
+        self._skeleton_connect_action.setEnabled(True)
+        self._skeleton_finish_action.setEnabled(True)
 
     def _on_skeleton_drawing_cancelled(self) -> None:
         self._finish_skeleton_drawing_ui()
+
+    def _start_quick_skeleton_drawing(self, skeleton: SkeletonTemplate) -> None:
+        if self._image.isNull():
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Quick-Draw Skeleton"),
+                self.tr("Open an image before creating a skeleton."),
+            )
+            return
+        self._quick_skeleton_template = skeleton
+        self._skeleton_drawing_label = skeleton.label
+        self._canvas_widgets.canvas.start_skeleton_drawing(
+            node_names=skeleton.keypoints,
+            edges=skeleton.edges,
+        )
+        self._skeleton_place_action.setChecked(True)
+        self._skeleton_place_action.setEnabled(False)
+        self._skeleton_connect_action.setEnabled(False)
+        self._skeleton_finish_action.setEnabled(False)
+        self._skeleton_drawing_toolbar.show()
+
+    def _finish_quick_skeleton_drawing(
+        self, top_left: QtCore.QPointF, bottom_right: QtCore.QPointF
+    ) -> None:
+        canvas = self._canvas_widgets.canvas
+        skeleton = self._quick_skeleton_template
+        if skeleton is None or canvas.skeleton_drawing_mode != "bbox":
+            return
+        drawing = canvas.skeleton_drawing()
+        try:
+            shape = make_skeleton_shape_from_nodes(
+                label=skeleton.label,
+                keypoints=skeleton.keypoints,
+                points=np.array([[point.x(), point.y()] for point in drawing.points]),
+                edges=skeleton.edges,
+                flip_idx=skeleton.flip_idx,
+                bounds=(
+                    top_left.x(),
+                    top_left.y(),
+                    bottom_right.x(),
+                    bottom_right.y(),
+                ),
+            )
+        except ValueError as error:
+            self.show_error_message(
+                self.tr("Invalid skeleton bounding box"),
+                self.tr("<b>%s</b><br>Draw a box containing every keypoint.") % error,
+            )
+            return
+        canvas.take_skeleton_drawing()
+        self._finish_skeleton_drawing_ui()
+        self._insert_shapes([shape])
+        self._switch_canvas_mode(edit=True)
 
     def _place_skeleton_from_file(self) -> None:
         if self._image.isNull():
@@ -1277,6 +1361,55 @@ class MainWindow(QtWidgets.QMainWindow):
             self._place_skeleton_from_file()
         elif selected is draw_action:
             self._new_skeleton()
+
+    def _choose_skeleton_to_quick_draw(self) -> None:
+        if self._image.isNull():
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Quick-Draw Skeleton"),
+                self.tr("Open an image before creating a skeleton."),
+            )
+            return
+
+        templates = self._recent_skeleton_templates()
+        menu = QtWidgets.QMenu(self)
+        template_actions: dict[QtGui.QAction, SkeletonTemplate] = {}
+        if templates:
+            menu.addSection(self.tr("Skeleton Templates"))
+            for filename, skeleton in templates:
+                template_action = menu.addAction(
+                    self.tr("%s — %s") % (skeleton.label, Path(filename).name)
+                )
+                template_action.setToolTip(filename)
+                template_actions[template_action] = skeleton
+            menu.addSeparator()
+        browse_action = menu.addAction(self.tr("Browse for Template…"))
+
+        selected = menu.exec(QtGui.QCursor.pos())  # type: ignore
+        if selected in template_actions:
+            self._start_quick_skeleton_drawing(template_actions[selected])
+        elif selected is browse_action:
+            self._quick_draw_skeleton_from_file()
+
+    def _quick_draw_skeleton_from_file(self) -> None:
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("Open Skeleton Template"),
+            str(Path(self._image_path).parent) if self._image_path else "",
+            self.tr("Skeleton templates (*.skeleton.json);;JSON files (*.json)"),
+        )
+        if not filename:
+            return
+        try:
+            skeleton = read_skeleton_file(filename)
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+            self.show_error_message(
+                self.tr("Error loading skeleton template"),
+                self.tr("<b>%s</b>") % error,
+            )
+            return
+        self._remember_skeleton_template(filename)
+        self._start_quick_skeleton_drawing(skeleton)
 
     def _recent_skeleton_templates(
         self,
@@ -1452,6 +1585,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _setup_toolbars(self) -> None:
         action = functools.partial(_utils.new_action, self)
         self._skeleton_drawing_label = ""
+        self._quick_skeleton_template = None
         self._skeleton_place_action = action(
             self.tr("Place Nodes"),
             lambda: self._set_skeleton_drawing_mode("nodes"),
@@ -1474,7 +1608,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._canvas_widgets.canvas.undo_skeleton_step,
             tip=self.tr("Remove the last node or bone from this skeleton draft"),
         )
-        skeleton_finish_action = action(
+        self._skeleton_finish_action = action(
             self.tr("Finish Skeleton"),
             self._finish_skeleton_drawing,
             tip=self.tr("Finish this skeleton and create an editable Shape"),
@@ -1491,7 +1625,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._skeleton_connect_action,
                 skeleton_undo_action,
                 None,
-                skeleton_finish_action,
+                self._skeleton_finish_action,
                 skeleton_cancel_action,
             ],
             button_style=Qt.ToolButtonStyle.ToolButtonTextOnly,
@@ -1502,6 +1636,7 @@ class MainWindow(QtWidgets.QMainWindow):
         canvas = self._canvas_widgets.canvas
         canvas.skeleton_node_requested.connect(self._name_skeleton_node)
         canvas.skeleton_finish_requested.connect(self._finish_skeleton_drawing)
+        canvas.skeleton_bbox_completed.connect(self._finish_quick_skeleton_drawing)
         canvas.skeleton_drawing_cancelled.connect(self._on_skeleton_drawing_cancelled)
 
         select_ai_model = QtWidgets.QWidgetAction(self)

@@ -134,6 +134,33 @@ def test_make_skeleton_shape_from_interactively_placed_nodes() -> None:
     assert shape.other_data["pose"]["edges"] == [[0, 1], [1, 2]]
 
 
+def test_make_skeleton_shape_uses_explicit_bounds() -> None:
+    shape = make_skeleton_shape_from_nodes(
+        label="rat",
+        keypoints=("snout", "tail_base"),
+        points=np.array([[20, 30], [80, 70]]),
+        edges=((0, 1),),
+        flip_idx=(0, 1),
+        bounds=(10, 15, 100, 90),
+    )
+
+    np.testing.assert_array_equal(
+        shape.points[:4], [[10, 15], [100, 15], [100, 90], [10, 90]]
+    )
+
+
+def test_make_skeleton_shape_rejects_bounds_outside_keypoints() -> None:
+    with pytest.raises(ValueError, match="contain every keypoint"):
+        make_skeleton_shape_from_nodes(
+            label="rat",
+            keypoints=("snout",),
+            points=np.array([[20, 30]]),
+            edges=(),
+            flip_idx=(0,),
+            bounds=(25, 25, 100, 90),
+        )
+
+
 def test_skeleton_template_from_shape_recovers_edited_layout(
     skeleton: SkeletonTemplate,
 ) -> None:

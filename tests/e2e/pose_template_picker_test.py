@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+from PySide6 import QtCore
 
 from labelme._app import MainWindow
 from labelme._pose import SkeletonTemplate
@@ -27,6 +28,8 @@ def test_skeleton_is_a_left_toolbar_draw_action(raw_win: MainWindow) -> None:
     assert ("skeleton", raw_win._actions.create_skeleton_mode) in raw_win._actions.draw
     assert raw_win._actions.create_skeleton_mode.text() == "Skeleton"
     assert raw_win._actions.create_skeleton_mode.isEnabled()
+    assert raw_win._actions.create_quick_skeleton_mode.text() == ("Quick-Draw Skeleton")
+    assert raw_win._actions.create_quick_skeleton_mode.isEnabled()
 
 
 def test_remembered_skeleton_template_can_be_reused(
@@ -65,3 +68,24 @@ def test_placed_skeleton_uses_small_centered_default(
             (width * 0.4, height * 0.6),
         ],
     )
+
+
+def test_quick_draw_places_nodes_in_template_order_then_uses_drawn_box(
+    raw_win: MainWindow, tmp_path: Path
+) -> None:
+    path = tmp_path / "rat.skeleton.json"
+    _write_rat_template(path)
+    skeleton = read_skeleton_file(path)
+
+    raw_win._start_quick_skeleton_drawing(skeleton)
+    raw_win._name_skeleton_node(QtCore.QPointF(30, 30))
+    raw_win._name_skeleton_node(QtCore.QPointF(70, 60))
+
+    raw_win._finish_quick_skeleton_drawing(
+        top_left=QtCore.QPointF(10, 10),
+        bottom_right=QtCore.QPointF(100, 90),
+    )
+
+    shape = raw_win._canvas_widgets.canvas.shapes[-1]
+    assert shape.other_data["pose"]["keypoints"] == ["snout", "tail_base"]
+    np.testing.assert_array_equal(shape.points[4:], [[30, 30], [70, 60]])

@@ -111,6 +111,40 @@ def test_cancel_interactive_skeleton_emits_signal(canvas: Canvas) -> None:
     cancelled.assert_called_once_with()
 
 
+@pytest.mark.gui
+def test_quick_skeleton_uses_template_order_then_requests_box(canvas: Canvas) -> None:
+    canvas.start_skeleton_drawing(node_names=("snout", "tail_base"), edges=((0, 1),))
+    assert canvas.next_skeleton_node_name == "snout"
+
+    canvas.add_skeleton_node(name="snout", point=QPointF(20, 20))
+    assert canvas.next_skeleton_node_name == "tail_base"
+    image = QtGui.QImage(100, 100, QtGui.QImage.Format.Format_ARGB32)
+    painter = QtGui.QPainter(image)
+    canvas._draw_skeleton_drawing_layer(painter)
+    painter.end()
+    canvas.add_skeleton_node(name="tail_base", point=QPointF(60, 40))
+
+    assert canvas.next_skeleton_node_name is None
+    assert canvas.skeleton_drawing_mode == "bbox"
+    assert canvas.skeleton_drawing().edges == ((0, 1),)
+
+
+@pytest.mark.gui
+def test_quick_skeleton_emits_completed_bounding_box(canvas: Canvas) -> None:
+    completed = Mock()
+    canvas.skeleton_bbox_completed.connect(completed)
+    canvas.start_skeleton_drawing(node_names=("snout",))
+    canvas.add_skeleton_node(name="snout", point=QPointF(20, 20))
+    canvas._skeleton_bbox_start = QPointF(5, 6)
+
+    canvas._release_left(pos=QPointF(70, 50))
+
+    completed.assert_called_once()
+    top_left, bottom_right = completed.call_args.args
+    assert (top_left.x(), top_left.y()) == (5.0, 6.0)
+    assert (bottom_right.x(), bottom_right.y()) == (70.0, 50.0)
+
+
 def _make_oriented_rectangle(corners: list[tuple[float, float]]) -> Shape:
     return Shape(
         shape_type="oriented_rectangle",

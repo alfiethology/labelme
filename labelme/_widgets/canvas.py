@@ -52,7 +52,7 @@ class SkeletonDrawingResult:
     edges: tuple[tuple[int, int], ...]
 
 
-_SkeletonDrawingMode = Literal["nodes", "edges"]
+_SkeletonDrawingMode = Literal["nodes", "edges", "bbox"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -199,6 +199,7 @@ class Canvas(QtWidgets.QWidget):
     zoom_rect_selected = QtCore.Signal(QRectF)
     skeleton_node_requested = QtCore.Signal(QPointF)
     skeleton_finish_requested = QtCore.Signal()
+    skeleton_bbox_completed = QtCore.Signal(QPointF, QPointF)
     skeleton_drawing_cancelled = QtCore.Signal()
 
     mode: _CanvasMode = _CanvasMode.EDIT
@@ -297,6 +298,9 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_node_points: list[QPointF] = []
         self._skeleton_edges: list[tuple[int, int]] = []
         self._skeleton_edge_start: int | None = None
+        self._skeleton_expected_node_names: tuple[str, ...] = ()
+        self._skeleton_bbox_start: QPointF | None = None
+        self._skeleton_bbox_end: QPointF | None = None
         self._skeleton_visibility_target: tuple[Shape, int] | None = None
         self.context_menus = _canvas_interaction.ContextMenuPair(
             without_selection=QtWidgets.QMenu(),
@@ -419,7 +423,19 @@ class Canvas(QtWidgets.QWidget):
     def skeleton_drawing_mode(self) -> _SkeletonDrawingMode | None:
         return self._skeleton_drawing_mode
 
-    def start_skeleton_drawing(self) -> None:
+    @property
+    def next_skeleton_node_name(self) -> str | None:
+        index = len(self._skeleton_node_points)
+        if index < len(self._skeleton_expected_node_names):
+            return self._skeleton_expected_node_names[index]
+        return None
+
+    def start_skeleton_drawing(
+        self,
+        *,
+        node_names: tuple[str, ...] = (),
+        edges: tuple[tuple[int, int], ...] = (),
+    ) -> None:
         if self._current is not None:
             self._cancel_current_shape()
         self.deselect_shape()
@@ -427,8 +443,11 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_drawing_mode = "nodes"
         self._skeleton_node_names = []
         self._skeleton_node_points = []
-        self._skeleton_edges = []
+        self._skeleton_edges = list(edges)
         self._skeleton_edge_start = None
+        self._skeleton_expected_node_names = node_names
+        self._skeleton_bbox_start = None
+        self._skeleton_bbox_end = None
         self._apply_cursor(CursorRole.DRAW)
         self.update()
         self._update_status()
@@ -451,11 +470,23 @@ class Canvas(QtWidgets.QWidget):
             raise ValueError(f"skeleton node name already exists: {name!r}")
         self._skeleton_node_names.append(name)
         self._skeleton_node_points.append(QPointF(point))
+        if self._skeleton_expected_node_names and len(
+            self._skeleton_node_points
+        ) == len(self._skeleton_expected_node_names):
+            self._skeleton_drawing_mode = "bbox"
         self.update()
         self._update_status()
 
     def undo_skeleton_step(self) -> None:
-        if self._skeleton_drawing_mode == "edges" and self._skeleton_edges:
+        if self._skeleton_drawing_mode == "bbox":
+            if self._skeleton_bbox_start is not None:
+                self._skeleton_bbox_start = None
+                self._skeleton_bbox_end = None
+            elif self._skeleton_node_points:
+                self._skeleton_drawing_mode = "nodes"
+                self._skeleton_node_points.pop()
+                self._skeleton_node_names.pop()
+        elif self._skeleton_drawing_mode == "edges" and self._skeleton_edges:
             self._skeleton_edges.pop()
             self._skeleton_edge_start = None
         elif self._skeleton_drawing_mode == "nodes" and self._skeleton_node_points:
@@ -495,6 +526,9 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_node_points = []
         self._skeleton_edges = []
         self._skeleton_edge_start = None
+        self._skeleton_expected_node_names = ()
+        self._skeleton_bbox_start = None
+        self._skeleton_bbox_end = None
         self.mode = _CanvasMode.EDIT
         self._release_cursor()
         self.update()
@@ -677,7 +711,11 @@ class Canvas(QtWidgets.QWidget):
         messages: list[str] = []
         if self._skeleton_drawing_mode == "nodes":
             messages.append(self.tr("Drawing skeleton nodes"))
-            messages.append(self.tr("Click to place and name a node"))
+            next_name = self.next_skeleton_node_name
+            if next_name is None:
+                messages.append(self.tr("Click to place and name a node"))
+            else:
+                messages.append(self.tr("Click to place: %s") % next_name)
             messages.append(self.tr("Enter or Space to finish • Esc to cancel"))
             self.status_updated.emit(" • ".join(messages))
             return
@@ -689,6 +727,12 @@ class Canvas(QtWidgets.QWidget):
                 name = self._skeleton_node_names[self._skeleton_edge_start]
                 messages.append(self.tr("Selected %s; click the second node") % name)
             messages.append(self.tr("Enter or Space to finish • Esc to cancel"))
+            self.status_updated.emit(" • ".join(messages))
+            return
+        if self._skeleton_drawing_mode == "bbox":
+            messages.append(self.tr("Draw the skeleton bounding box"))
+            messages.append(self.tr("Drag from one corner to the opposite corner"))
+            messages.append(self.tr("Ctrl+Z undoes the last node • Esc cancels"))
             self.status_updated.emit(" • ".join(messages))
             return
         if self.mode == _CanvasMode.CREATE:
@@ -767,6 +811,11 @@ class Canvas(QtWidgets.QWidget):
             self._advance_pan(event=event)
             return
         if self.is_drawing_skeleton:
+            if (
+                self._skeleton_drawing_mode == "bbox"
+                and self._skeleton_bbox_start is not None
+            ):
+                self._skeleton_bbox_end = QPointF(pos)
             self._apply_cursor(CursorRole.DRAW)
             self.update()
             self._update_status()
@@ -1211,8 +1260,12 @@ class Canvas(QtWidgets.QWidget):
                 return
             if self._skeleton_drawing_mode == "nodes":
                 self.skeleton_node_requested.emit(QPointF(pos))
-            else:
+            elif self._skeleton_drawing_mode == "edges":
                 self._select_skeleton_edge_endpoint(pos=pos)
+            else:
+                self._skeleton_bbox_start = QPointF(pos)
+                self._skeleton_bbox_end = QPointF(pos)
+                self.update()
             return
         is_shift_pressed = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
         if self.mode == _CanvasMode.CREATE:
@@ -1435,7 +1488,11 @@ class Canvas(QtWidgets.QWidget):
             if self._zoom_rect_start is not None:
                 self._finish_zoom_rect()
                 return
-            self._release_left()
+            try:
+                pos = self._transform_point_widget_to_image(event.position())
+            except AttributeError:
+                pos = self._prev_move_point
+            self._release_left(pos=pos)
             return
         if button == Qt.MouseButton.MiddleButton:
             self._finish_pan()
@@ -1552,7 +1609,22 @@ class Canvas(QtWidgets.QWidget):
         visibility[keypoint_index] = state
         return True
 
-    def _release_left(self) -> None:
+    def _release_left(self, *, pos: QPointF) -> None:
+        if (
+            self._skeleton_drawing_mode == "bbox"
+            and self._skeleton_bbox_start is not None
+        ):
+            self._skeleton_bbox_end = QPointF(pos)
+            rect = QRectF(
+                self._skeleton_bbox_start, self._skeleton_bbox_end
+            ).normalized()
+            if rect.width() >= 2 and rect.height() >= 2:
+                self.skeleton_bbox_completed.emit(rect.topLeft(), rect.bottomRight())
+            else:
+                self._skeleton_bbox_start = None
+                self._skeleton_bbox_end = None
+                self.update()
+            return
         if self.mode != _CanvasMode.EDIT:
             return
         if self.hovered_shape is None:
@@ -1957,10 +2029,28 @@ class Canvas(QtWidgets.QWidget):
             pen.setWidth(2)
             painter.setPen(pen)
             for start, end in self._skeleton_edges:
+                if start >= len(self._skeleton_node_points) or end >= len(
+                    self._skeleton_node_points
+                ):
+                    continue
                 painter.drawLine(
                     self._skeleton_node_points[start] * self.scale,
                     self._skeleton_node_points[end] * self.scale,
                 )
+            if self._skeleton_bbox_start is not None:
+                bbox_end = self._skeleton_bbox_end or self._skeleton_bbox_start
+                bbox_pen = QtGui.QPen(QtGui.QColor(255, 235, 0))
+                bbox_pen.setWidth(2)
+                bbox_pen.setStyle(Qt.PenStyle.DashLine)
+                painter.setPen(bbox_pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRect(
+                    QRectF(
+                        self._skeleton_bbox_start * self.scale,
+                        bbox_end * self.scale,
+                    ).normalized()
+                )
+                painter.setPen(pen)
             if self._skeleton_edge_start is not None:
                 preview_pen = QtGui.QPen(line_color)
                 preview_pen.setWidth(2)
@@ -2312,7 +2402,9 @@ class Canvas(QtWidgets.QWidget):
         if self.is_drawing_skeleton:
             if key == Qt.Key.Key_Escape:
                 self.cancel_skeleton_drawing()
-            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Space):
+            elif key in (Qt.Key.Key_Return, Qt.Key.Key_Space) and (
+                self._skeleton_drawing_mode != "bbox"
+            ):
                 self.skeleton_finish_requested.emit()
             elif a0.matches(QtGui.QKeySequence.StandardKey.Undo):
                 self.undo_skeleton_step()
@@ -2439,6 +2531,9 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_node_points = []
         self._skeleton_edges = []
         self._skeleton_edge_start = None
+        self._skeleton_expected_node_names = ()
+        self._skeleton_bbox_start = None
+        self._skeleton_bbox_end = None
         self._skeleton_visibility_target = None
         self._vertex_drag_targets = []
         self._current = None
@@ -2504,6 +2599,9 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_node_points = []
         self._skeleton_edges = []
         self._skeleton_edge_start = None
+        self._skeleton_expected_node_names = ()
+        self._skeleton_bbox_start = None
+        self._skeleton_bbox_end = None
         self._skeleton_visibility_target = None
         self._current = None
         self._highlight = None

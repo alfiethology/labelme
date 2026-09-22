@@ -177,6 +177,7 @@ def make_skeleton_shape_from_nodes(
     points: npt.ArrayLike,
     edges: tuple[tuple[int, int], ...],
     flip_idx: tuple[int, ...],
+    bounds: tuple[float, float, float, float] | None = None,
 ) -> Shape:
     """Create a Skeleton Shape around interactively placed image-space nodes."""
 
@@ -190,12 +191,26 @@ def make_skeleton_shape_from_nodes(
         raise ValueError("place at least one skeleton node")
     if not np.isfinite(node_points).all():
         raise ValueError("skeleton node positions must be finite")
-    minimum = node_points.min(axis=0)
-    maximum = node_points.max(axis=0)
-    span = maximum - minimum
-    margin = np.maximum(span * 0.1, np.array([10.0, 10.0]))
-    left, top = minimum - margin
-    right, bottom = maximum + margin
+    if bounds is None:
+        minimum = node_points.min(axis=0)
+        maximum = node_points.max(axis=0)
+        span = maximum - minimum
+        margin = np.maximum(span * 0.1, np.array([10.0, 10.0]))
+        left, top = minimum - margin
+        right, bottom = maximum + margin
+    else:
+        left, top, right, bottom = bounds
+        if not all(np.isfinite(bounds)):
+            raise ValueError("skeleton bounds must be finite")
+        if right <= left or bottom <= top:
+            raise ValueError("skeleton bounds must have positive width and height")
+        if (
+            (node_points[:, 0] < left).any()
+            or (node_points[:, 0] > right).any()
+            or (node_points[:, 1] < top).any()
+            or (node_points[:, 1] > bottom).any()
+        ):
+            raise ValueError("skeleton bounds must contain every keypoint")
     positions = (node_points - np.array([left, top])) / np.array(
         [right - left, bottom - top]
     )
