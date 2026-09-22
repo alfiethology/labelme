@@ -278,7 +278,9 @@ A skeleton is a set of named points, such as `nose`, `left_eye`, and
    between them. Repeat for the other bones.
 1. Select **Finish Skeleton**, or press Enter or Space. The mirror-pairs box is
    optional: leave it empty if you do not need it. Otherwise, enter pairs such
-   as `left_eye,right_eye`, one pair per line.
+   as `left_eye,right_eye`, one pair per line. A file browser then asks where
+   to save the new reusable `.skeleton.json` template. Cancelling this browser
+   keeps the skeleton annotation but skips saving the template.
 1. Adjust the finished skeleton if needed. Drag a point to move just that
    point, or drag a box corner to resize the whole skeleton. Skeleton bounding
    boxes remain axis-aligned to match YOLO pose labels.
@@ -295,10 +297,30 @@ The annotation file and a skeleton template are different:
 
 - `hen.json` stores the skeleton you placed on one particular image.
 - A file ending in `.skeleton.json` is a reusable blank layout. To make one,
-  select a finished skeleton and choose
-  **Pose > Save Selected Skeleton As Template…**. On another image, use
-  **Pose > Place Skeleton From File…**, then move its points onto the new
-  animal.
+  save it in the file browser shown after drawing a new skeleton, or select a
+  finished skeleton and choose **Pose > Save Selected Skeleton As Template…**.
+  On another image, use **Pose > Place Skeleton From File…**, then move its
+  points onto the new animal.
+
+### Quick-draw skeleton annotations
+
+Once you have a `.skeleton.json` template, **Quick-Draw Skeleton** avoids naming
+and connecting the same points for every animal:
+
+1. Open an image and choose **Quick-Draw Skeleton** from the left toolbar or
+   **Pose > Quick-Draw Skeleton…**.
+1. Choose a remembered template, or select **Browse for Template…**.
+1. Click the animal's keypoints in the order shown in the status bar. This is
+   the `keypoints` order stored in the template and used by the YOLO pose
+   export. Node names and bones appear automatically as points are placed.
+1. After the final node, drag a bounding box around the complete animal. The
+   horizontal and vertical cursor guides work like rectangle drawing. The box
+   must contain every placed keypoint.
+
+Use Ctrl+Z to undo the last point and Escape to cancel the draft. To make dense
+skeletons easier to see, use **Pose > Set Node Marker Size…** and
+**Pose > Set Node Label Size…**. These display settings persist between Labelme
+sessions and do not change the saved coordinates or YOLO export.
 
 To mark a point as visible, hidden, or missing, right-click it. For more detail,
 including how to export a YOLO pose dataset, see
