@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
@@ -56,11 +57,14 @@ def export_yolo_pose_dataset(
     if output_root.exists() and any(output_root.iterdir()):
         raise ValueError(f"output directory must be empty: {output_root}")
 
-    annotation_paths = sorted(
+    json_paths = sorted(
         path
         for path in annotation_root.rglob("*.json")
         if not path.name.endswith(".skeleton.json") and output_root not in path.parents
     )
+    annotation_paths = [
+        path for path in json_paths if _looks_like_labelme_annotation(path=path)
+    ]
     if not annotation_paths:
         raise ValueError(f"no Annotation Files found in: {annotation_root}")
 
@@ -128,6 +132,15 @@ def export_yolo_pose_dataset(
         train_images=len(items) - val_count,
         val_images=val_count,
     )
+
+
+def _looks_like_labelme_annotation(*, path: Path) -> bool:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        # Let read_label_file surface a useful error for a likely broken annotation.
+        return True
+    return isinstance(raw, dict) and "imagePath" in raw and "shapes" in raw
 
 
 def _read_export_item(*, path: Path) -> _ExportItem:

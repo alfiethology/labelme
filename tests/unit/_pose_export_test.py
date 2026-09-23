@@ -53,6 +53,10 @@ def test_export_yolo_pose_dataset(tmp_path: Path) -> None:
     annotations.mkdir()
     _write_annotation(annotations / "one.json", x_offset=0)
     _write_annotation(annotations / "two.json", x_offset=20)
+    (annotations / "summary.json").write_text(
+        '{"images": 2, "note": "not a Labelme annotation"}',
+        encoding="utf-8",
+    )
     output = tmp_path / "yolo"
 
     result = export_yolo_pose_dataset(

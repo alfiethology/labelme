@@ -7,6 +7,7 @@ import math
 import os
 import platform
 import re
+import shutil
 import subprocess
 import tempfile
 import time
@@ -78,6 +79,7 @@ from ._widgets import UniqueLabelQListWidget
 from ._widgets import ZoomWidget
 from ._widgets import download_ai_model
 from ._widgets import format_shape_label
+from ._widgets import read_label_shortcuts
 from ._widgets._shape_render import SKELETON_NODE_LABEL_FONT_SIZE
 from ._yolo_predictions import shapes_from_yolo_result
 
@@ -189,6 +191,7 @@ class _Menus(NamedTuple):
     file: QtWidgets.QMenu
     edit: QtWidgets.QMenu
     view: QtWidgets.QMenu
+    tools: QtWidgets.QMenu
     refine: QtWidgets.QMenu
     help: QtWidgets.QMenu
     label_list: QtWidgets.QMenu
@@ -260,10 +263,13 @@ class MainWindow(QtWidgets.QMainWindow):
         ) = None
         self._runtime_label_colors: dict[str, tuple[int, int, int]] = {}
         self._zoom_speed = _DEFAULT_ZOOM_SPEED
+        self._change_label_choices: dict[str, str] | None = None
+        self._change_label_index = 0
         self._docks = self._setup_dock_widgets()
 
         self.setAcceptDrops(True)
         self._canvas_widgets = self._setup_canvas()
+        self._canvas_widgets.canvas.installEventFilter(self)
 
         self._actions = self._setup_actions()
         self._persistent_actions = {
@@ -983,6 +989,7 @@ class MainWindow(QtWidgets.QMainWindow):
         file_menu = self.menu(self.tr("&File"))
         edit_menu = self.menu(self.tr("&Edit"))
         view_menu = self.menu(self.tr("&View"))
+        tools_menu = self.menu(self.tr("&Tools"))
         pose_menu = self.menu(self.tr("&Pose"))
         refine_menu = self.menu(self.tr("&Refine"))
         help_menu = self.menu(self.tr("&Help"))
@@ -1016,6 +1023,26 @@ class MainWindow(QtWidgets.QMainWindow):
             ),
         )
         _utils.add_actions(help_menu, (help_, self._actions.about))
+        _utils.add_actions(
+            tools_menu,
+            (
+                action(
+                    self.tr("Change Labels…"),
+                    self._change_labels,
+                    tip=self.tr(
+                        "Review shapes one at a time using labels and keys from a file"
+                    ),
+                ),
+                action(
+                    self.tr("Delete Unlabelled Images…"),
+                    self._delete_unlabelled_images,
+                    tip=self.tr(
+                        "Delete every image in the open directory without "
+                        "an annotation file"
+                    ),
+                ),
+            ),
+        )
         _utils.add_actions(
             refine_menu,
             (
@@ -1139,9 +1166,290 @@ class MainWindow(QtWidgets.QMainWindow):
             file=file_menu,
             edit=edit_menu,
             view=view_menu,
+            tools=tools_menu,
             refine=refine_menu,
             help=help_menu,
             label_list=label_menu,
+        )
+
+    def _delete_unlabelled_images(self) -> None:
+        if not self._prev_opened_dir:
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Delete Unlabelled Images"),
+                self.tr("Open an image directory first."),
+            )
+            return
+
+        image_paths = _scan_image_files(root_dir=self._prev_opened_dir)
+        candidates = [
+            Path(image_path)
+            for image_path in image_paths
+            if not Path(
+                _resolve_label_path(
+                    image_or_label_path=image_path, output_dir=self._output_dir
+                )
+            ).exists()
+        ]
+        if self._is_changed and self._image_path is not None:
+            current_path = Path(self._image_path)
+            candidates = [path for path in candidates if path != current_path]
+
+        if not candidates:
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Delete Unlabelled Images"),
+                self.tr("No unlabelled images were found."),
+            )
+            return
+
+        confirmation = QtWidgets.QMessageBox(self)
+        confirmation.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+        confirmation.setWindowTitle(self.tr("Delete Unlabelled Images"))
+        confirmation.setText(
+            self.tr(
+                "Are you sure you want to permanently delete {count} unlabelled "
+                "image(s) from {directory}? This cannot be undone."
+            ).format(count=len(candidates), directory=self._prev_opened_dir)
+        )
+        yes_button = confirmation.addButton(
+            self.tr("Yes"), QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+        )
+        no_button = confirmation.addButton(
+            self.tr("No"), QtWidgets.QMessageBox.ButtonRole.RejectRole
+        )
+        confirmation.setDefaultButton(no_button)
+        confirmation.setEscapeButton(no_button)
+        confirmation.exec()
+        if confirmation.clickedButton() is not yes_button:
+            return
+
+        deleted: set[str] = set()
+        failures: list[tuple[Path, OSError]] = []
+        for image_path in candidates:
+            try:
+                image_path.unlink()
+                deleted.add(str(image_path))
+            except OSError as error:
+                failures.append((image_path, error))
+
+        current_deleted = self._image_path in deleted
+        current_row = self._docks.file_list.currentRow()
+        with QtCore.QSignalBlocker(self._docks.file_list):
+            if current_deleted:
+                self._docks.file_list.setCurrentRow(-1)
+            for row in reversed(range(self._docks.file_list.count())):
+                if self._docks.file_list.item(row).text() in deleted:
+                    self._docks.file_list.takeItem(row)
+
+        if current_deleted:
+            self.reset_state()
+            self.mark_clean()
+            if self._docks.file_list.count():
+                self._docks.file_list.setCurrentRow(
+                    min(current_row, self._docks.file_list.count() - 1)
+                )
+            else:
+                self.update_action_states(False)
+                self._canvas_widgets.canvas.setEnabled(False)
+
+        self._actions.open_next_img.setEnabled(self._docks.file_list.count() > 1)
+        self._actions.open_prev_img.setEnabled(self._docks.file_list.count() > 1)
+        if failures:
+            first_path, first_error = failures[0]
+            self.show_error_message(
+                self.tr("Some images could not be deleted"),
+                self.tr(
+                    "Deleted {deleted}; failed to delete {failed}. "
+                    "First error: {path}: {error}"
+                ).format(
+                    deleted=len(deleted),
+                    failed=len(failures),
+                    path=first_path,
+                    error=first_error,
+                ),
+            )
+        else:
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Delete Unlabelled Images"),
+                self.tr("Deleted {count} unlabelled image(s).").format(
+                    count=len(deleted)
+                ),
+            )
+
+    def _change_labels(self) -> None:
+        if self._image.isNull():
+            QtWidgets.QMessageBox.information(
+                self,
+                self.tr("Change Labels"),
+                self.tr("Open an annotated image before changing labels."),
+            )
+            return
+        shortcut_path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("Choose Label Shortcut File"),
+            self._prev_opened_dir or self.current_path(),
+            self.tr("Text files (*.txt *.csv);;All files (*)"),
+        )
+        if not shortcut_path:
+            return
+        try:
+            choices = read_label_shortcuts(shortcut_path)
+        except (OSError, UnicodeError, ValueError) as error:
+            self.show_error_message(self.tr("Invalid label shortcut file"), str(error))
+            return
+
+        self._change_label_choices = {key.casefold(): label for label, key in choices}
+        self._change_label_index = 0
+        self._switch_canvas_mode(edit=True)
+        self._select_change_label_shape()
+
+    def _change_label_help(self) -> str:
+        assert self._change_label_choices is not None
+        choices = ", ".join(
+            f"{key.upper()}={label}"
+            for key, label in self._change_label_choices.items()
+        )
+        return self.tr(
+            "Change Labels: {choices}; Enter=keep label; Space=save and next image; "
+            "Shift+Space=skip/don’t know; Esc=exit review"
+        ).format(choices=choices)
+
+    def _select_change_label_shape(self) -> None:
+        if self._change_label_choices is None:
+            return
+        shapes = self._canvas_widgets.canvas.shapes
+        if not shapes:
+            self._canvas_widgets.canvas.deselect_shape()
+            self.show_status_message(
+                self.tr("Change Labels: no shapes; Space saves and opens next image."),
+                0,
+            )
+            return
+        if self._change_label_index >= len(shapes):
+            self._canvas_widgets.canvas.deselect_shape()
+            self.show_status_message(
+                self.tr(
+                    "All shapes reviewed. Adjust any shape if needed, then press "
+                    "Space to save and open the next image."
+                ),
+                0,
+            )
+            self._canvas_widgets.canvas.setFocus()
+            return
+        self._canvas_widgets.canvas.select_shapes([shapes[self._change_label_index]])
+        self._canvas_widgets.canvas.setFocus()
+        self.show_status_message(self._change_label_help(), 0)
+
+    def _advance_change_label_shape(self, label: str | None) -> None:
+        canvas = self._canvas_widgets.canvas
+        if self._change_label_choices is None or not canvas.shapes:
+            return
+        selected = [shape for shape in canvas.selected_shapes if shape in canvas.shapes]
+        if not selected and self._change_label_index >= len(canvas.shapes):
+            return
+        shape = selected[0] if selected else canvas.shapes[self._change_label_index]
+        current_index = canvas.shapes.index(shape)
+        if label is not None and shape.label != label:
+            canvas.backup_shapes()
+            shape.label = label
+            item = self._docks.label_list.find_item_by_shape(shape)
+            item.set_label(
+                text=format_shape_label(shape),
+                color=self._get_rgb_by_label(
+                    label=label, unique_label_list=self._docks.unique_label_list
+                ),
+            )
+            self._label_dialog.add_label_history(label)
+            if self._docks.unique_label_list.find_label_item(label) is None:
+                self._docks.unique_label_list.add_label_item(
+                    label=label,
+                    color=self._get_rgb_by_label(
+                        label=label, unique_label_list=self._docks.unique_label_list
+                    ),
+                )
+            canvas.update()
+            self.mark_dirty()
+        self._change_label_index = current_index + 1
+        self._select_change_label_shape()
+
+    def _save_and_advance_change_label_image(self) -> None:
+        if self._image.isNull():
+            return
+        self._save_label_file()
+        if self._is_changed:
+            return
+        current_row = self._docks.file_list.currentRow()
+        if current_row + 1 >= self._docks.file_list.count():
+            self.show_status_message(
+                self.tr("Change Labels: reached the final image."), 5000
+            )
+            return
+        self._open_next_image()
+
+    def _stop_change_labels(self) -> None:
+        self._change_label_choices = None
+        self._canvas_widgets.canvas.deselect_shape()
+        self.show_status_message(self.tr("Exited Change Labels review."), 3000)
+
+    def _move_current_frame_to_skipped(self) -> None:
+        assert self._image_path is not None
+        image_path = Path(self._image_path)
+        annotation_path = Path(self.current_label_file_path())
+
+        # Materialize unsaved annotations so every skipped image has its JSON.
+        if (self._is_changed or not annotation_path.exists()) and not self.save_labels(
+            label_path=str(annotation_path)
+        ):
+            return
+
+        skipped_dir = annotation_path.parent / "skipped_frames"
+        image_destination = skipped_dir / image_path.name
+        annotation_destination = skipped_dir / annotation_path.name
+        collisions = [
+            path
+            for path in (image_destination, annotation_destination)
+            if path.exists()
+        ]
+        if collisions:
+            self.show_error_message(
+                self.tr("Cannot skip frame"),
+                self.tr("A file already exists in skipped_frames: {}").format(
+                    collisions[0].name
+                ),
+            )
+            return
+
+        annotation_moved = False
+        try:
+            skipped_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(annotation_path), str(annotation_destination))
+            annotation_moved = True
+            shutil.move(str(image_path), str(image_destination))
+        except OSError as error:
+            if annotation_moved and annotation_destination.exists():
+                try:
+                    shutil.move(str(annotation_destination), str(annotation_path))
+                except OSError:
+                    logger.exception("Failed to restore annotation after skip failed")
+            self.show_error_message(self.tr("Cannot skip frame"), str(error))
+            return
+
+        file_list = self._docks.file_list
+        current_row = file_list.currentRow()
+        with QtCore.QSignalBlocker(file_list):
+            file_list.takeItem(current_row)
+        self.reset_state()
+        self.mark_clean()
+        if file_list.count():
+            file_list.setCurrentRow(min(current_row, file_list.count() - 1))
+        else:
+            self.update_action_states(False)
+            self._canvas_widgets.canvas.setEnabled(False)
+        self.show_status_message(
+            self.tr("Moved image and annotation to {}").format(str(skipped_dir)),
+            delay=5000,
         )
 
     def _new_skeleton(self) -> None:
@@ -1755,7 +2063,7 @@ class MainWindow(QtWidgets.QMainWindow):
             result = export_yolo_pose_dataset(
                 annotation_dir=annotation_dir, output_dir=output_dir
             )
-        except (OSError, TypeError, ValueError) as error:
+        except (LabelFileError, OSError, TypeError, ValueError) as error:
             self.show_error_message(
                 self.tr("Error exporting YOLO pose dataset"),
                 self.tr("<b>%s</b>") % error,
@@ -2370,8 +2678,17 @@ class MainWindow(QtWidgets.QMainWindow):
         ) and (primary_screen := QtWidgets.QApplication.primaryScreen()):
             self.move(primary_screen.availableGeometry().topLeft())
 
-        if file_or_dir:
-            self._load_from_file_or_dir(file_or_dir=file_or_dir)
+        startup_path = file_or_dir
+        if startup_path is None:
+            saved_directory = _existing_directory(
+                self._window_state.value("files/lastOpenedDirectory")
+            )
+            if saved_directory is None:
+                self._window_state.remove("files/lastOpenedDirectory")
+            else:
+                startup_path = saved_directory
+        if startup_path:
+            self._load_from_file_or_dir(file_or_dir=startup_path)
 
     def _setup_status_bar(self) -> _StatusBarWidgets:
         message = QtWidgets.QLabel(self.tr("%s started.") % __appname__)
@@ -2855,7 +3172,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._label_list_menu_origin = self._docks.label_list.mapToGlobal(point)
         try:
             # PySide6 type QMenu.exec() argument too narrowly
-            self._menus.label_list.exec(self._label_list_menu_origin)  # ty: ignore[invalid-argument-type]
+            self._menus.label_list.exec(
+                self._label_list_menu_origin
+            )  # ty: ignore[invalid-argument-type]
         finally:
             self._label_list_menu_origin = None
 
@@ -2869,7 +3188,9 @@ class MainWindow(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         change_color = menu.addAction(self.tr("Change Class Color…"))
         picked = menu.exec(
-            self._docks.unique_label_list.mapToGlobal(point)  # ty: ignore[invalid-argument-type]
+            self._docks.unique_label_list.mapToGlobal(
+                point
+            )  # ty: ignore[invalid-argument-type]
         )
         if picked != change_color:
             return
@@ -3708,7 +4029,14 @@ class MainWindow(QtWidgets.QMainWindow):
         # it; otherwise an arrow-key walk of the list ends after one keypress.
         if not self._docks.file_list.hasFocus():
             self._canvas_widgets.canvas.setFocus()
-        self.show_status_message(self.tr("Loaded %s") % Path(image_or_label_path).name)
+        if self._change_label_choices is not None:
+            self._change_label_index = 0
+            self._switch_canvas_mode(edit=True)
+            self._select_change_label_shape()
+        else:
+            self.show_status_message(
+                self.tr("Loaded %s") % Path(image_or_label_path).name
+            )
         logger.info(
             "Loaded file: {!r} in {:.0f}ms",
             image_or_label_path,
@@ -4186,7 +4514,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if system == "Darwin":
             subprocess.Popen(["open", "-t", config_file])
         elif system == "Windows":
-            os.startfile(config_file)  # ty: ignore[unresolved-attribute]  # Windows-only
+            os.startfile(
+                config_file
+            )  # ty: ignore[unresolved-attribute]  # Windows-only
         else:
             subprocess.Popen(["xdg-open", config_file])
 
@@ -4254,6 +4584,31 @@ class MainWindow(QtWidgets.QMainWindow):
             checked = not canvas.zoom_rect_enabled
         canvas.set_zoom_rect_mode(checked)
         self._zoom_rect_button.setChecked(checked)
+
+    def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if (
+            self._change_label_choices is not None
+            and watched is self._canvas_widgets.canvas
+            and event.type() == QtCore.QEvent.Type.KeyPress
+            and isinstance(event, QtGui.QKeyEvent)
+        ):
+            if event.key() == Qt.Key.Key_Space:
+                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                    self._move_current_frame_to_skipped()
+                else:
+                    self._save_and_advance_change_label_image()
+                return True
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                self._advance_change_label_shape(label=None)
+                return True
+            if event.key() == Qt.Key.Key_Escape:
+                self._stop_change_labels()
+                return True
+            label = self._change_label_choices.get(event.text().casefold())
+            if label is not None:
+                self._advance_change_label_shape(label=label)
+                return True
+        return super().eventFilter(watched, event)
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Z:
@@ -4443,6 +4798,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._docks.file_dock.setToolTip("")
 
         self._prev_opened_dir = root_dir
+        self._window_state.setValue(
+            "files/lastOpenedDirectory", str(Path(root_dir).resolve())
+        )
         self._image_path = None
         self._docks.file_list.clear()
 
@@ -5023,6 +5381,16 @@ def _format_window_title(
     if dirty:
         title = f"{title}*"
     return title
+
+
+def _existing_directory(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    path = Path(value)
+    try:
+        return str(path) if path.is_dir() else None
+    except OSError:
+        return None
 
 
 def _normalize_recent_skeleton_paths(value: object) -> list[str]:

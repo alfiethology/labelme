@@ -124,6 +124,18 @@ def test_format_window_title(
         (None, []),
     ],
 )
+def test_existing_directory(tmp_path: Path) -> None:
+    directory = tmp_path / "images"
+    directory.mkdir()
+    file_path = tmp_path / "image.png"
+    file_path.touch()
+
+    assert _app._existing_directory(str(directory)) == str(directory)
+    assert _app._existing_directory(str(file_path)) is None
+    assert _app._existing_directory(str(tmp_path / "missing")) is None
+    assert _app._existing_directory(None) is None
+
+
 def test_normalize_recent_skeleton_paths(value: object, expected: list[str]) -> None:
     assert _app._normalize_recent_skeleton_paths(value) == expected
 
