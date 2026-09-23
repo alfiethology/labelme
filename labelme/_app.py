@@ -1438,18 +1438,31 @@ class MainWindow(QtWidgets.QMainWindow):
 
         file_list = self._docks.file_list
         current_row = file_list.currentRow()
+        next_image_path: str | None = None
         with QtCore.QSignalBlocker(file_list):
             file_list.takeItem(current_row)
+            if file_list.count():
+                next_row = min(current_row, file_list.count() - 1)
+                file_list.setCurrentRow(next_row)
+                next_image_path = file_list.item(next_row).text()
         self.reset_state()
         self.mark_clean()
-        if file_list.count():
-            file_list.setCurrentRow(min(current_row, file_list.count() - 1))
+        if next_image_path is not None:
+            # Do not rely on itemSelectionChanged here: removing the current row
+            # can leave its successor current without emitting another change.
+            self._load_file(image_or_label_path=next_image_path)
         else:
             self.update_action_states(False)
             self._canvas_widgets.canvas.setEnabled(False)
-        self.show_status_message(
-            self.tr("Moved image and annotation to {}").format(str(skipped_dir)),
-            delay=5000,
+            self.show_status_message(
+                self.tr("Moved image and annotation to {}").format(str(skipped_dir)),
+                delay=5000,
+            )
+        logger.info(
+            "Moved skipped image {!r} and annotation {!r} to {!r}",
+            image_path,
+            annotation_path,
+            skipped_dir,
         )
 
     def _new_skeleton(self) -> None:
