@@ -78,6 +78,7 @@ from ._widgets import UniqueLabelQListWidget
 from ._widgets import ZoomWidget
 from ._widgets import download_ai_model
 from ._widgets import format_shape_label
+from ._widgets._shape_render import SKELETON_NODE_LABEL_FONT_SIZE
 from ._yolo_predictions import shapes_from_yolo_result
 
 
@@ -1530,12 +1531,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 template_actions[template_action] = skeleton
             menu.addSeparator()
         browse_action = menu.addAction(self.tr("Browse for Template…"))
+        draw_action = menu.addAction(self.tr("Draw New Skeleton…"))
 
         selected = menu.exec(QtGui.QCursor.pos())  # type: ignore
         if selected in template_actions:
             self._start_quick_skeleton_drawing(template_actions[selected])
         elif selected is browse_action:
             self._quick_draw_skeleton_from_file()
+        elif selected is draw_action:
+            self._new_skeleton()
 
     def _quick_draw_skeleton_from_file(self) -> None:
         filename, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -2328,7 +2332,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._canvas_widgets.canvas.set_skeleton_node_label_size(
             cast(
                 int,
-                self._window_state.value("pose/nodeLabelSize", 9, type=int),
+                self._window_state.value(
+                    "pose/nodeLabelSize", SKELETON_NODE_LABEL_FONT_SIZE, type=int
+                ),
             )
         )
         #

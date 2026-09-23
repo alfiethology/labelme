@@ -185,6 +185,18 @@ def test_quick_skeleton_uses_template_order_then_requests_box(canvas: Canvas) ->
 
 
 @pytest.mark.gui
+def test_quick_skeleton_undo_preserves_template_edges(canvas: Canvas) -> None:
+    canvas.start_skeleton_drawing(node_names=("snout", "tail_base"), edges=((0, 1),))
+    canvas.add_skeleton_node(name="snout", point=QPointF(20, 20))
+    canvas.add_skeleton_node(name="tail_base", point=QPointF(60, 40))
+
+    canvas.undo_skeleton_step()
+    canvas.add_skeleton_node(name="tail_base", point=QPointF(70, 50))
+
+    assert canvas.skeleton_drawing().edges == ((0, 1),)
+
+
+@pytest.mark.gui
 def test_quick_skeleton_emits_completed_bounding_box(canvas: Canvas) -> None:
     completed = Mock()
     canvas.skeleton_bbox_completed.connect(completed)
@@ -213,6 +225,11 @@ def test_skeleton_display_sizes_are_independent_from_other_vertices(
     assert context.point_size == 8
     assert context.skeleton_node_size == 14
     assert context.skeleton_node_label_size == 18
+
+
+@pytest.mark.gui
+def test_skeleton_node_label_size_defaults_to_20(canvas: Canvas) -> None:
+    assert canvas.skeleton_node_label_size == 20
 
 
 def _make_oriented_rectangle(corners: list[tuple[float, float]]) -> Shape:

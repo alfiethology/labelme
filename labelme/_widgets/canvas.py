@@ -32,6 +32,7 @@ from .._shape import ShapeType
 from . import _canvas_interaction
 from ._canvas_interaction import CursorRole
 from ._canvas_interaction import HitKind
+from ._shape_render import SKELETON_NODE_LABEL_FONT_SIZE
 from ._shape_render import Palette
 from ._shape_render import ShapeRenderContext
 from ._shape_render import VertexHighlight
@@ -293,13 +294,14 @@ class Canvas(QtWidgets.QWidget):
         self._point_size: int = 8
         self._point_type: Literal["square", "round"] = "round"
         self._skeleton_node_size = 8
-        self._skeleton_node_label_size = 9
+        self._skeleton_node_label_size = SKELETON_NODE_LABEL_FONT_SIZE
         self._draft_palette = _DEFAULT_PALETTE
         self._palette_cache = {}
         self._skeleton_drawing_mode: _SkeletonDrawingMode | None = None
         self._skeleton_node_names: list[str] = []
         self._skeleton_node_points: list[QPointF] = []
         self._skeleton_edges: list[tuple[int, int]] = []
+        self._skeleton_template_edges: tuple[tuple[int, int], ...] = ()
         self._skeleton_edge_start: int | None = None
         self._skeleton_expected_node_names: tuple[str, ...] = ()
         self._skeleton_bbox_start: QPointF | None = None
@@ -477,6 +479,7 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_node_names = list(initial_names)
         self._skeleton_node_points = [QPointF(point) for point in initial_points]
         self._skeleton_edges = list(edges)
+        self._skeleton_template_edges = edges
         self._skeleton_edge_start = None
         self._skeleton_expected_node_names = node_names
         self._skeleton_bbox_start = None
@@ -563,7 +566,9 @@ class Canvas(QtWidgets.QWidget):
             self._skeleton_node_points.pop()
             self._skeleton_node_names.pop()
             self._skeleton_edges = [
-                edge for edge in self._skeleton_edges if removed not in edge
+                edge
+                for edge in self._skeleton_edges
+                if removed not in edge or edge in self._skeleton_template_edges
             ]
             self._skeleton_edge_start = None
         self.update()
@@ -594,6 +599,7 @@ class Canvas(QtWidgets.QWidget):
         self._skeleton_node_names = []
         self._skeleton_node_points = []
         self._skeleton_edges = []
+        self._skeleton_template_edges = ()
         self._skeleton_edge_start = None
         self._skeleton_expected_node_names = ()
         self._skeleton_bbox_start = None

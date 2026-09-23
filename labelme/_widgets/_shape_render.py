@@ -20,7 +20,7 @@ from .._shape import nearest_edge_index
 from .._shape import oriented_rectangle_arrow_points
 
 PEN_WIDTH: Final[int] = 2
-SKELETON_NODE_LABEL_FONT_SIZE: Final[int] = 9
+SKELETON_NODE_LABEL_FONT_SIZE: Final[int] = 20
 SKELETON_NODE_LABEL_COLOR: Final[QtGui.QColor] = QtGui.QColor(255, 235, 0)
 SKELETON_NODE_LABEL_OUTLINE_COLOR: Final[QtGui.QColor] = QtGui.QColor(0, 0, 0)
 SKELETON_NODE_LABEL_OUTLINE_WIDTH: Final[float] = 1.0

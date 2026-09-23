@@ -132,6 +132,31 @@ def test_quick_draw_places_nodes_in_template_order_then_uses_drawn_box(
     np.testing.assert_array_equal(shape.points[4:], [[30, 30], [70, 60]])
 
 
+def test_quick_draw_menu_can_start_a_new_skeleton(
+    raw_win: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    new_skeleton = Mock()
+    monkeypatch.setattr(raw_win, "_new_skeleton", new_skeleton)
+    monkeypatch.setattr(raw_win, "_recent_skeleton_templates", lambda: [])
+
+    class Menu:
+        def __init__(self, parent: MainWindow) -> None:
+            self.actions: dict[str, object] = {}
+
+        def addAction(self, text: str) -> object:
+            self.actions[text] = object()
+            return self.actions[text]
+
+        def exec(self, pos: object) -> object:
+            return self.actions["Draw New Skeleton…"]
+
+    monkeypatch.setattr("labelme._app.QtWidgets.QMenu", Menu)
+
+    raw_win._choose_skeleton_to_quick_draw()
+
+    new_skeleton.assert_called_once_with()
+
+
 def test_finishing_new_skeleton_prompts_to_save_template(
     raw_win: MainWindow, monkeypatch: pytest.MonkeyPatch
 ) -> None:
