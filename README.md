@@ -117,6 +117,19 @@ The GitHub source is currently the canonical distribution of this fork. PyPI,
 labelme.io and Linux distribution packages provide the upstream project and do
 not necessarily contain the fork features listed above.
 
+> [!IMPORTANT]
+> This fork requires **Python 3.12, 3.13 or 3.14**. Check the interpreter that
+> will perform the installation with `python --version`; Python 3.11 and older
+> cannot install the current version.
+
+If you use Conda, create and activate a compatible environment first:
+
+```bash
+conda create --name labelme-env python=3.12 -y
+conda activate labelme-env
+python --version  # should report Python 3.12.x
+```
+
 ### Install this fork from GitHub
 
 Using `uv`:
