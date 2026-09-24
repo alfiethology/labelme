@@ -77,6 +77,8 @@ See [Animal pose annotation](docs/pose-estimation.md) for the complete workflow.
 
 - Snap new and existing polygon vertices to points in other annotations, then
   drag coincident polygon vertices together while snapping remains enabled.
+- [Review existing annotations with Change Labels](#review-existing-annotations-with-change-labels)
+  using configurable, multi-character keyboard sequences.
 - Enter point-drawing mode with the `P` shortcut and remove points quickly while
   editing.
 - Insert polygon vertices from edge interactions.
@@ -259,6 +261,176 @@ cd examples/semantic_segmentation
 labelme data_annotated/  # Open directory to annotate all images in it
 labelme data_annotated/ --labels labels.txt  # specify label list with a file
 ```
+
+### Review existing annotations with Change Labels
+
+**Tools > Change Labels…** is a keyboard-driven review mode for correcting the
+labels on existing shapes. It keeps the normal image and editable shapes on the
+main canvas, selects one shape at a time, and lets you replace its label by
+typing a short code. It is useful for reviewing model predictions or cleaning a
+large annotated image directory without repeatedly opening the label dialog.
+
+Change Labels uses a separate shortcut file. This is not the same file as the
+normal `--labels` file: a Change Labels file maps every allowed label to the
+letter-and-number sequence you want to type.
+
+#### 1. Create a label shortcut file
+
+Create a UTF-8 text or CSV file with one `label,shortcut` pair per line. For
+example, save the following as `bird-review.txt`:
+
+```text
+# label,shortcut
+Great_tit,gt
+Blue_tit,bt
+Long_tailed_tit,ltt
+Robin,r
+Unknown_bird,u1
+```
+
+The first column is the exact label that will be written into the Labelme JSON
+shape. The second column is the sequence you will type. In this example, type
+`g`, then `t`, then Enter or Space to assign `Great_tit`.
+
+The shortcut-file rules are:
+
+- Every non-comment row must contain exactly two comma-separated columns:
+  `label,shortcut`.
+- A label must not be empty. Labels may contain spaces, underscores and other
+  characters supported by Labelme. Quote a label containing a comma according
+  to normal CSV syntax, for example `"Tern, common",tc`.
+- A shortcut must contain one or more ASCII letters (`a`-`z`, `A`-`Z`) or digits
+  (`0`-`9`) and nothing else. Sequences such as `g`, `gt`, `bird2` and `123` are
+  valid. Spaces, punctuation, underscores and modifier-key notation such as
+  `Ctrl+G` are not valid shortcuts.
+- Shortcut length is not limited. Short sequences are usually faster to review
+  and easier to remember.
+- Matching is case-insensitive. `gt`, `GT` and typing `G` followed by `t` all
+  refer to the same shortcut, so they cannot be assigned to different labels.
+- Each label and each case-insensitive shortcut must be unique in the file.
+- Empty lines are ignored. A line whose first field starts with `#` (allowing
+  leading whitespace) is treated as a comment.
+- Do not add a header row unless you want `label,shortcut` itself to become a
+  real mapping. A comment such as `# label,shortcut` is safe.
+
+Single-character shortcuts are still supported, but they must also be confirmed
+with Enter or Space. This makes overlapping mappings unambiguous. For example,
+the following is valid:
+
+```text
+Gull,g
+Great_tit,gt
+```
+
+Type `g`, then Enter to choose `Gull`; type `g`, `t`, then Enter to choose
+`Great_tit`. Labelme does not apply `Gull` as soon as the first `g` is typed.
+
+#### 2. Open the images and annotations
+
+Open the directory you want to review with **File > Open Dir**, or pass it when
+starting Labelme:
+
+```bash
+labelme /home/user/current_working_labelling_directory
+```
+
+The images should already have Labelme JSON annotations if labels are to be
+changed. By default, each JSON file is beside its corresponding image. A
+separate labels directory also works; choose it with **File > Change Output
+Directory** or `--output`:
+
+```bash
+labelme /home/user/review_job/images --output /home/user/review_job/annotations
+```
+
+Change Labels follows the order shown in Labelme's **File List**. Select the
+image where review should begin before starting the mode. If an image has no
+shapes, there is nothing to relabel; press Space to save if necessary and move
+to the next image, or Shift+Space to move it to the skipped directory.
+
+#### 3. Start Change Labels
+
+1. With an image open, choose **Tools > Change Labels…**.
+1. Select the shortcut file created above. The file chooser accepts `.txt` and
+   `.csv` files, as well as other extensions through **All files**.
+1. Labelme switches the canvas to edit mode and selects the first shape in the
+   current image. The status bar lists the configured mappings and shows the
+   sequence typed so far.
+
+An invalid file is rejected before review starts. The error identifies the line
+with a missing column, empty label, invalid shortcut, duplicate label or
+duplicate shortcut, so the file can be corrected and selected again.
+
+#### 4. Review shapes and images
+
+For each selected shape, type its shortcut and confirm it. Nothing is changed
+while the sequence is merely being typed.
+
+| Input                                 | Result                                                                                                                                        |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Letter or number                      | Append it to the pending shortcut shown in the status bar.                                                                                    |
+| Enter or Space, with a sequence typed | Apply the matching label and select the next shape. After the final shape, save the annotation and open the next image automatically.         |
+| Backspace                             | Remove the last character from the pending shortcut.                                                                                          |
+| Enter, with no sequence typed         | Keep the selected shape's current label and select the next shape.                                                                            |
+| Space, with no sequence typed         | Save the current image immediately and open the next image, even if some shapes were not reviewed.                                            |
+| Shift+Space                           | Save the current annotation, move the image and JSON to `skipped_images`, remove the image from the current file list and load its successor. |
+| Escape                                | Exit Change Labels mode. The current image stays open, and changes already made remain available to save or undo normally.                    |
+
+If the confirmed sequence does not exactly match a configured shortcut, Labelme
+does not change the shape or advance. The status bar reports the unknown
+sequence. Use Backspace to correct it, or press Escape to leave review mode.
+
+An image may contain any number of shapes. Change Labels reviews them one by
+one, using the yellow selection shown on the normal canvas. You can still use
+the mouse to inspect, move or resize shapes while reviewing. Plain letters and
+numbers are reserved for the pending shortcut while this mode is active,
+including letters that are normally Labelme shortcuts; Ctrl-, Alt- and
+Meta-modified application shortcuts remain available.
+
+When a valid shortcut is confirmed on the final shape, Labelme saves the JSON
+and advances to the next image automatically. If saving fails, the image is not
+advanced, allowing the filesystem or annotation problem to be corrected without
+silently losing the edit. At the final image in the file list, Labelme saves it
+and reports that the end has been reached.
+
+#### Skipping an image
+
+Shift+Space is intended for an image that should be removed from the current
+review set rather than assigned a label. Labelme moves both the image and its
+JSON annotation into a directory named `skipped_images`. That directory is a
+**sibling of the current labels directory**, not a child of it. Keeping it
+outside the active directory tree prevents a recursive directory session from
+finding the skipped image again.
+
+When images and labels share one directory:
+
+```text
+/home/user/current_working_labelling_directory/
+    frame001.jpg
+    frame001.json
+/home/user/skipped_images/
+    skipped_frame.jpg
+    skipped_frame.json
+```
+
+When images and labels are separate:
+
+```text
+/home/user/review_job/images/
+/home/user/review_job/annotations/
+/home/user/review_job/skipped_images/
+```
+
+The destination is calculated from the directory containing the current JSON
+annotation. If the JSON does not exist yet or has unsaved changes, Labelme first
+writes it so the skipped image always travels with an annotation. The
+`skipped_images` directory is created automatically and reused for later skips.
+
+Labelme never overwrites a skipped file. If either destination filename already
+exists, the skip is cancelled and an error identifies the collision. Rename or
+move the existing file, then press Shift+Space again. A successful skip removes
+the image from the current **File List** before loading the next available
+image, so the review cannot cycle back to a file that was already skipped.
 
 ### Use a custom YOLO model
 
