@@ -16,7 +16,7 @@ from ._shape_render import _build_shape_points_paths
 
 
 def read_label_shortcuts(path: str | Path) -> list[tuple[str, str]]:
-    """Read ``label,key`` rows used by the change-labels review dialog."""
+    """Read ``label,key-sequence`` rows used by Change Labels."""
     choices: list[tuple[str, str]] = []
     labels: set[str] = set()
     keys: set[str] = set()
@@ -28,9 +28,10 @@ def read_label_shortcuts(path: str | Path) -> list[tuple[str, str]]:
                 raise ValueError(f"Line {line_number} must contain exactly: label,key")
             label, key = (value.strip() for value in row)
             normalized_key = key.casefold()
-            if not label or len(key) != 1 or not key.isprintable():
+            if not label or not key.isascii() or not key.isalnum():
                 raise ValueError(
-                    f"Line {line_number} needs a non-empty label and one printable key"
+                    f"Line {line_number} needs a non-empty label and a key sequence "
+                    "containing only letters and numbers"
                 )
             if label in labels:
                 raise ValueError(f"Duplicate label on line {line_number}: {label}")
@@ -134,6 +135,7 @@ class ChangeLabelsDialog(QtWidgets.QDialog):
         self._choices = choices
         self._labels = [shape.label or "" for shape in shapes]
         self._index = 0
+        self._typed_shortcut = ""
         self._skip_frame_requested = False
 
         self._heading = QtWidgets.QLabel()
@@ -194,11 +196,42 @@ class ChangeLabelsDialog(QtWidgets.QDialog):
         self.accept()
 
     def keyPressEvent(self, event: QtGui.QKeyEvent) -> None:
-        key = event.text().casefold()
-        for label, shortcut in self._choices:
-            if key == shortcut.casefold():
+        if event.key() in (
+            QtCore.Qt.Key.Key_Return,
+            QtCore.Qt.Key.Key_Enter,
+            QtCore.Qt.Key.Key_Space,
+        ):
+            shortcut = self._typed_shortcut
+            label = next(
+                (
+                    label
+                    for label, configured in self._choices
+                    if shortcut == configured.casefold()
+                ),
+                None,
+            )
+            if label is not None:
                 self._choose(label)
-                return
+            return
+        if event.key() == QtCore.Qt.Key.Key_Backspace:
+            self._typed_shortcut = self._typed_shortcut[:-1]
+            self._show_current()
+            return
+        text = event.text()
+        disallowed_modifiers = (
+            QtCore.Qt.KeyboardModifier.ControlModifier
+            | QtCore.Qt.KeyboardModifier.AltModifier
+            | QtCore.Qt.KeyboardModifier.MetaModifier
+        )
+        if (
+            text
+            and text.isascii()
+            and text.isalnum()
+            and not event.modifiers() & disallowed_modifiers
+        ):
+            self._typed_shortcut += text.casefold()
+            self._show_current()
+            return
         if event.key() == QtCore.Qt.Key.Key_Left:
             self._previous()
             return
@@ -227,27 +260,34 @@ class ChangeLabelsDialog(QtWidgets.QDialog):
 
     def _choose(self, label: str) -> None:
         self._labels[self._index] = label
+        self._typed_shortcut = ""
         if self._index < len(self._shapes) - 1:
             self._index += 1
         self._show_current()
 
     def _previous(self) -> None:
         if self._index > 0:
+            self._typed_shortcut = ""
             self._index -= 1
             self._show_current()
 
     def _next(self) -> None:
         if self._index < len(self._shapes) - 1:
+            self._typed_shortcut = ""
             self._index += 1
             self._show_current()
 
     def _show_current(self) -> None:
         shape = self._shapes[self._index]
         self._heading.setText(
-            self.tr("Annotation {current} of {total} — current label: {label}").format(
+            self.tr(
+                "Annotation {current} of {total} — current label: {label} — "
+                "typed shortcut: {shortcut}"
+            ).format(
                 current=self._index + 1,
                 total=len(self._shapes),
                 label=self._labels[self._index] or self.tr("(none)"),
+                shortcut=self._typed_shortcut.upper() or self.tr("(none)"),
             )
         )
         self._highlight.set_shape(shape)

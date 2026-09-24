@@ -265,6 +265,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._zoom_speed = _DEFAULT_ZOOM_SPEED
         self._change_label_choices: dict[str, str] | None = None
         self._change_label_index = 0
+        self._change_label_input = ""
         self._docks = self._setup_dock_widgets()
 
         self.setAcceptDrops(True)
@@ -1302,6 +1303,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._change_label_choices = {key.casefold(): label for label, key in choices}
         self._change_label_index = 0
+        self._change_label_input = ""
         self._switch_canvas_mode(edit=True)
         self._select_change_label_shape()
 
@@ -1312,9 +1314,34 @@ class MainWindow(QtWidgets.QMainWindow):
             for key, label in self._change_label_choices.items()
         )
         return self.tr(
-            "Change Labels: {choices}; Enter=keep label; Space=save and next image; "
-            "Shift+Space=skip/don’t know; Esc=exit review"
-        ).format(choices=choices)
+            "Change Labels: {choices}; typed={typed}; type a shortcut, then "
+            "Enter/Space=apply; Backspace=correct; Shift+Space=skip/don’t know; "
+            "Esc=exit review"
+        ).format(
+            choices=choices,
+            typed=self._change_label_input.upper() or self.tr("(none)"),
+        )
+
+    def _append_change_label_input(self, text: str) -> None:
+        self._change_label_input += text.casefold()
+        self.show_status_message(self._change_label_help(), 0)
+
+    def _confirm_change_label_input(self) -> None:
+        assert self._change_label_choices is not None
+        shortcut = self._change_label_input
+        label = self._change_label_choices.get(shortcut)
+        if label is None:
+            self.show_status_message(
+                self.tr(
+                    "Unknown label shortcut: {shortcut}. Press Backspace to correct it."
+                ).format(shortcut=shortcut.upper()),
+                0,
+            )
+            return
+        self._change_label_input = ""
+        self._advance_change_label_shape(label=label)
+        if self._change_label_index >= len(self._canvas_widgets.canvas.shapes):
+            self._save_and_advance_change_label_image()
 
     def _select_change_label_shape(self) -> None:
         if self._change_label_choices is None:
@@ -1371,6 +1398,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
             canvas.update()
             self.mark_dirty()
+        self._change_label_input = ""
         self._change_label_index = current_index + 1
         self._select_change_label_shape()
 
@@ -1390,6 +1418,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _stop_change_labels(self) -> None:
         self._change_label_choices = None
+        self._change_label_input = ""
         self._canvas_widgets.canvas.deselect_shape()
         self.show_status_message(self.tr("Exited Change Labels review."), 3000)
 
@@ -1404,7 +1433,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ):
             return
 
-        skipped_dir = annotation_path.parent / "skipped_frames"
+        skipped_dir = annotation_path.parent.parent / "skipped_images"
         image_destination = skipped_dir / image_path.name
         annotation_destination = skipped_dir / annotation_path.name
         collisions = [
@@ -1415,7 +1444,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if collisions:
             self.show_error_message(
                 self.tr("Cannot skip frame"),
-                self.tr("A file already exists in skipped_frames: {}").format(
+                self.tr("A file already exists in skipped_images: {}").format(
                     collisions[0].name
                 ),
             )
@@ -3185,9 +3214,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._label_list_menu_origin = self._docks.label_list.mapToGlobal(point)
         try:
             # PySide6 type QMenu.exec() argument too narrowly
-            self._menus.label_list.exec(
-                self._label_list_menu_origin
-            )  # ty: ignore[invalid-argument-type]
+            self._menus.label_list.exec(self._label_list_menu_origin)  # ty: ignore[invalid-argument-type]
         finally:
             self._label_list_menu_origin = None
 
@@ -3201,9 +3228,7 @@ class MainWindow(QtWidgets.QMainWindow):
         menu = QtWidgets.QMenu(self)
         change_color = menu.addAction(self.tr("Change Class Color…"))
         picked = menu.exec(
-            self._docks.unique_label_list.mapToGlobal(
-                point
-            )  # ty: ignore[invalid-argument-type]
+            self._docks.unique_label_list.mapToGlobal(point)  # ty: ignore[invalid-argument-type]
         )
         if picked != change_color:
             return
@@ -4044,6 +4069,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._canvas_widgets.canvas.setFocus()
         if self._change_label_choices is not None:
             self._change_label_index = 0
+            self._change_label_input = ""
             self._switch_canvas_mode(edit=True)
             self._select_change_label_shape()
         else:
@@ -4527,9 +4553,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if system == "Darwin":
             subprocess.Popen(["open", "-t", config_file])
         elif system == "Windows":
-            os.startfile(
-                config_file
-            )  # ty: ignore[unresolved-attribute]  # Windows-only
+            os.startfile(config_file)  # ty: ignore[unresolved-attribute]  # Windows-only
         else:
             subprocess.Popen(["xdg-open", config_file])
 
@@ -4602,24 +4626,54 @@ class MainWindow(QtWidgets.QMainWindow):
         if (
             self._change_label_choices is not None
             and watched is self._canvas_widgets.canvas
-            and event.type() == QtCore.QEvent.Type.KeyPress
+            and event.type()
+            in (QtCore.QEvent.Type.ShortcutOverride, QtCore.QEvent.Type.KeyPress)
             and isinstance(event, QtGui.QKeyEvent)
         ):
-            if event.key() == Qt.Key.Key_Space:
-                if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                    self._move_current_frame_to_skipped()
-                else:
-                    self._save_and_advance_change_label_image()
+            disallowed_modifiers = (
+                Qt.KeyboardModifier.ControlModifier
+                | Qt.KeyboardModifier.AltModifier
+                | Qt.KeyboardModifier.MetaModifier
+            )
+            text = event.text()
+            is_shortcut_character = (
+                bool(text)
+                and text.isascii()
+                and text.isalnum()
+                and not event.modifiers() & disallowed_modifiers
+            )
+            if event.type() == QtCore.QEvent.Type.ShortcutOverride:
+                if is_shortcut_character:
+                    event.accept()
+                    return True
+                return super().eventFilter(watched, event)
+            if (
+                event.key() == Qt.Key.Key_Space
+                and event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            ):
+                self._move_current_frame_to_skipped()
                 return True
-            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                self._advance_change_label_shape(label=None)
+            if event.key() in (
+                Qt.Key.Key_Return,
+                Qt.Key.Key_Enter,
+                Qt.Key.Key_Space,
+            ):
+                if self._change_label_input:
+                    self._confirm_change_label_input()
+                elif event.key() == Qt.Key.Key_Space:
+                    self._save_and_advance_change_label_image()
+                else:
+                    self._advance_change_label_shape(label=None)
+                return True
+            if event.key() == Qt.Key.Key_Backspace and self._change_label_input:
+                self._change_label_input = self._change_label_input[:-1]
+                self.show_status_message(self._change_label_help(), 0)
                 return True
             if event.key() == Qt.Key.Key_Escape:
                 self._stop_change_labels()
                 return True
-            label = self._change_label_choices.get(event.text().casefold())
-            if label is not None:
-                self._advance_change_label_shape(label=label)
+            if is_shortcut_character:
+                self._append_change_label_input(text)
                 return True
         return super().eventFilter(watched, event)
 

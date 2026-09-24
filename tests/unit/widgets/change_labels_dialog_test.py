@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from PySide6 import QtCore
 from PySide6 import QtGui
 from PySide6 import QtWidgets
+from pytestqt.qtbot import QtBot
 
 from labelme._shape import Shape
 from labelme._widgets.change_labels_dialog import ChangeLabelsDialog
@@ -12,10 +15,10 @@ from labelme._widgets.change_labels_dialog import _ShapeHighlightItem
 from labelme._widgets.change_labels_dialog import read_label_shortcuts
 
 
-def test_read_label_shortcuts(tmp_path) -> None:
+def test_read_label_shortcuts(tmp_path: Path) -> None:
     path = tmp_path / "labels.txt"
-    path.write_text("# bird labels\nblue_tit,b\ngreat_tit,g\n", encoding="utf-8")
-    assert read_label_shortcuts(path) == [("blue_tit", "b"), ("great_tit", "g")]
+    path.write_text("# bird labels\nblue_tit,b2\ngreat_tit,gt\n", encoding="utf-8")
+    assert read_label_shortcuts(path) == [("blue_tit", "b2"), ("great_tit", "gt")]
 
 
 @pytest.mark.parametrize(
@@ -23,12 +26,15 @@ def test_read_label_shortcuts(tmp_path) -> None:
     [
         ("", "no choices"),
         ("blue_tit\n", "exactly"),
-        ("blue_tit,bb\n", "one printable key"),
-        ("blue_tit,b\ngreat_tit,B\n", "Duplicate key"),
+        ("blue_tit,b!\n", "only letters and numbers"),
+        ("blue_tit,b_t\n", "only letters and numbers"),
+        ("blue_tit,gt\ngreat_tit,GT\n", "Duplicate key"),
         ("blue_tit,b\nblue_tit,g\n", "Duplicate label"),
     ],
 )
-def test_read_label_shortcuts_rejects_invalid_files(tmp_path, text, match) -> None:
+def test_read_label_shortcuts_rejects_invalid_files(
+    tmp_path: Path, text: str, match: str
+) -> None:
     path = tmp_path / "labels.txt"
     path.write_text(text, encoding="utf-8")
     with pytest.raises(ValueError, match=match):
@@ -36,7 +42,7 @@ def test_read_label_shortcuts_rejects_invalid_files(tmp_path, text, match) -> No
 
 
 def test_all_supported_shape_types_render_a_highlight(
-    qapp: QtWidgets.QApplication, qtbot
+    qapp: QtWidgets.QApplication, qtbot: QtBot
 ) -> None:
     common = dict(label="old")
     shapes = [
@@ -103,7 +109,7 @@ def test_highlight_is_unfilled_and_uses_a_thin_cosmetic_outline(
 
 
 def test_skip_dont_know_requests_frame_move(
-    qapp: QtWidgets.QApplication, qtbot
+    qapp: QtWidgets.QApplication, qtbot: QtBot
 ) -> None:
     dialog = ChangeLabelsDialog(
         image=QtGui.QImage(20, 20, QtGui.QImage.Format.Format_RGB32),
@@ -122,8 +128,8 @@ def test_skip_dont_know_requests_frame_move(
     assert dialog.skip_frame_requested is True
 
 
-def test_shortcut_changes_label_and_advances(
-    qapp: QtWidgets.QApplication, qtbot
+def test_shortcut_sequence_changes_label_only_after_confirmation(
+    qapp: QtWidgets.QApplication, qtbot: QtBot
 ) -> None:
     shapes = [
         Shape(label="old", shape_type="rectangle", points=[[1, 1], [10, 10]]),
@@ -132,11 +138,19 @@ def test_shortcut_changes_label_and_advances(
     dialog = ChangeLabelsDialog(
         image=QtGui.QImage(40, 40, QtGui.QImage.Format.Format_RGB32),
         shapes=shapes,
-        choices=[("blue_tit", "b"), ("great_tit", "g")],
+        choices=[("blue_tit", "b2"), ("great_tit", "gt")],
     )
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.keyClick(dialog, "b")
+    qtbot.keyClick(dialog, "2")
+    assert dialog.labels == ["old", "old"]
+    qtbot.keyClick(dialog, QtCore.Qt.Key.Key_Return)
     qtbot.keyClick(dialog, "g")
+    qtbot.keyClick(dialog, "x")
+    qtbot.keyClick(dialog, QtCore.Qt.Key.Key_Backspace)
+    qtbot.keyClick(dialog, "t")
+    assert dialog.labels == ["blue_tit", "old"]
+    qtbot.keyClick(dialog, QtCore.Qt.Key.Key_Space)
     assert dialog.labels == ["blue_tit", "great_tit"]
     assert [shape.label for shape in shapes] == ["old", "old"]
