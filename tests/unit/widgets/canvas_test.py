@@ -515,6 +515,20 @@ def test_quick_skeleton_crosshair_appears_only_for_bounding_box(
 
 
 @pytest.mark.gui
+def test_quick_skeleton_bounding_box_crosshair_is_yellow_dotted_and_thicker(
+    canvas: Canvas,
+) -> None:
+    canvas.start_skeleton_drawing(node_names=("snout",))
+    canvas.add_skeleton_node(name="snout", point=QPointF(20, 20))
+
+    pen = canvas._crosshair_pen()
+
+    assert pen.color() == QtGui.QColor(255, 235, 0)
+    assert pen.width() == 2
+    assert pen.style() == Qt.PenStyle.DotLine
+
+
+@pytest.mark.gui
 def test_set_shape_visible_toggles_visibility(canvas: Canvas) -> None:
     # Visibility is canvas state keyed by object identity.
     shape = Shape(

@@ -2261,7 +2261,7 @@ class Canvas(QtWidgets.QWidget):
         if not self._should_draw_crosshair(cursor=cursor):
             return
         assert cursor is not None
-        painter.setPen(self.palette().color(QtGui.QPalette.ColorRole.WindowText))
+        painter.setPen(self._crosshair_pen())
         cx = int(cursor.x() * self.scale)
         cy = int(cursor.y() * self.scale)
         if self._allow_out_of_bounds_points:
@@ -2279,6 +2279,14 @@ class Canvas(QtWidgets.QWidget):
             bottom = int(self.pixmap.height() * self.scale) - 1
         painter.drawLine(left, cy, right, cy)
         painter.drawLine(cx, top, cx, bottom)
+
+    def _crosshair_pen(self) -> QtGui.QPen:
+        if self.is_drawing_skeleton and self._skeleton_drawing_mode == "bbox":
+            pen = QtGui.QPen(QtGui.QColor(255, 235, 0))
+            pen.setWidth(2)
+            pen.setStyle(Qt.PenStyle.DotLine)
+            return pen
+        return QtGui.QPen(self.palette().color(QtGui.QPalette.ColorRole.WindowText))
 
     def _draw_center_dots_layer(self, painter: QtGui.QPainter) -> None:
         if not self._show_center_dots:

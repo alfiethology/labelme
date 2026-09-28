@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Changed the cursor guide lines shown while drawing a Quick-Draw Skeleton bounding box to a brighter yellow, two-pixel dotted style so they remain visible over the animal.
 - Changed startup to remember the last successfully opened image directory and reopen it automatically on the next launch when no explicit file or directory is supplied; missing or moved directories are forgotten safely.
 - Changed the Settings dialog to keep a stable, resizable window size, with scrolling when the available height cannot fit its content ([#2403](https://github.com/wkentaro/labelme/pull/2403))
 - Replaced the zoom control's "What's This" help with a plain hover tooltip naming the `Ctrl+Wheel` canvas zoom shortcut. The old text was reachable only by giving the toolbar zoom box keyboard focus and pressing Shift+F1 (no menu entry, no `?` button), and the zoom key bindings it listed are already shown next to Zoom In/Zoom Out in the View menu ([#2443](https://github.com/wkentaro/labelme/pull/2443))
