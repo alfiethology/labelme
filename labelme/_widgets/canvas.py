@@ -733,7 +733,66 @@ class Canvas(QtWidgets.QWidget):
         self._release_cursor()
         self._update_status()
 
+    @property
+    def bounding_box_quick_edit(self) -> bool:
+        return self._bounding_box_quick_edit
+
+    def set_bounding_box_quick_edit(self, enabled: bool) -> None:
+        self._bounding_box_quick_edit = enabled
+        self._quick_edit_index = 0
+        self._quick_edit_corner = None
+        self._reset_interaction_state()
+        if enabled:
+            self.mode = _CanvasMode.EDIT
+            self.set_zoom_rect_mode(False)
+            self._select_quick_edit_rectangle()
+            self._apply_cursor(CursorRole.DRAW)
+        else:
+            self.deselect_shape()
+            self._release_cursor()
+        self._update_status()
+        self.update()
+
+    def _quick_edit_rectangles(self) -> list[Shape]:
+        return [shape for shape in self.shapes if shape.shape_type == "rectangle"]
+
+    def _select_quick_edit_rectangle(self) -> None:
+        rectangles = self._quick_edit_rectangles()
+        selected = rectangles[self._quick_edit_index : self._quick_edit_index + 1]
+        for shape in selected:
+            shape.visible = True
+        self.select_shapes(selected)
+
+    def _quick_edit_click(self, pos: QPointF) -> None:
+        rectangles = self._quick_edit_rectangles()
+        if self._quick_edit_index >= len(rectangles):
+            return
+        if self._should_constrain_to_pixmap(pos):
+            return
+        if self._quick_edit_corner is None:
+            self._quick_edit_corner = QPointF(pos)
+        else:
+            first = self._quick_edit_corner
+            # Reject zero-area boxes and keep the first corner for another try.
+            if first.x() == pos.x() or first.y() == pos.y():
+                return
+            shape = rectangles[self._quick_edit_index]
+            shape.points = np.array(
+                [
+                    [min(first.x(), pos.x()), min(first.y(), pos.y())],
+                    [max(first.x(), pos.x()), max(first.y(), pos.y())],
+                ]
+            )
+            self.backup_shapes()
+            self.shape_moved.emit()
+            self._quick_edit_corner = None
+            self._quick_edit_index += 1
+            self._select_quick_edit_rectangle()
+        self.update()
+
     def set_editing(self, value: bool = True) -> None:
+        if self._bounding_box_quick_edit:
+            self.set_bounding_box_quick_edit(False)
         self.mode = _CanvasMode.EDIT if value else _CanvasMode.CREATE
         if self.mode == _CanvasMode.EDIT:
             # CREATE -> EDIT
@@ -788,6 +847,29 @@ class Canvas(QtWidgets.QWidget):
         return self._hovered_rotation is not None
 
     def _update_status(self, extra_messages: list[str] | None = None) -> None:
+        if self._bounding_box_quick_edit:
+            count = len(self._quick_edit_rectangles())
+            if self._quick_edit_index >= count:
+                prompt = self.tr("No rectangles left to edit")
+            else:
+                corner = (
+                    self.tr("top left")
+                    if self._quick_edit_corner is None
+                    else self.tr("bottom right")
+                )
+                prompt = self.tr("Box %s/%s: click %s corner") % (
+                    self._quick_edit_index + 1,
+                    count,
+                    corner,
+                )
+            self.status_updated.emit(
+                self.tr(
+                    "Bounding Box Quick Edit: %s • "
+                    "Space to save and open next image • Esc to exit"
+                )
+                % prompt
+            )
+            return
         messages: list[str] = []
         if self._skeleton_drawing_mode == "nodes":
             messages.append(self.tr("Drawing skeleton nodes"))
@@ -889,6 +971,10 @@ class Canvas(QtWidgets.QWidget):
         self._dispatch_pointer_move(pos=pos, event=a0)
 
     def _dispatch_pointer_move(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
+        if self._bounding_box_quick_edit and self._pan_anchor is None:
+            self._apply_cursor(CursorRole.DRAW)
+            self.update()
+            return
         if self._zoom_rect_start is not None:
             self._zoom_rect_end = event.position()
             self.update()
@@ -1322,6 +1408,10 @@ class Canvas(QtWidgets.QWidget):
 
     def _dispatch_pointer_press(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
         button = event.button()
+        if self._bounding_box_quick_edit and button != Qt.MouseButton.MiddleButton:
+            if button == Qt.MouseButton.LeftButton:
+                self._quick_edit_click(pos)
+            return
         if button == Qt.MouseButton.LeftButton:
             self._left_button_held = True
             if self._zoom_rect_enabled:
@@ -1581,6 +1671,11 @@ class Canvas(QtWidgets.QWidget):
         self._update_status()
 
     def _dispatch_pointer_release(self, event: QtGui.QMouseEvent) -> None:
+        if (
+            self._bounding_box_quick_edit
+            and event.button() != Qt.MouseButton.MiddleButton
+        ):
+            return
         button = event.button()
         if button == Qt.MouseButton.RightButton:
             self._release_right(event=event)
@@ -1874,6 +1969,8 @@ class Canvas(QtWidgets.QWidget):
         return len(self._current.points) >= 3
 
     def mouseDoubleClickEvent(self, a0: QtGui.QMouseEvent) -> None:
+        if self._bounding_box_quick_edit:
+            return
         if self._double_click != "close":
             return
         if not self._can_close_shape():
@@ -2107,6 +2204,7 @@ class Canvas(QtWidgets.QWidget):
             self._draw_pixmap_layer,
             self._draw_crosshair_layer,
             self._draw_committed_shapes_layer,
+            self._draw_quick_edit_preview_layer,
             self._draw_center_dots_layer,
             self._draw_skeleton_drawing_layer,
             self._draw_active_shape_layer,
@@ -2281,12 +2379,30 @@ class Canvas(QtWidgets.QWidget):
         painter.drawLine(cx, top, cx, bottom)
 
     def _crosshair_pen(self) -> QtGui.QPen:
-        if self.is_drawing_skeleton and self._skeleton_drawing_mode == "bbox":
+        if (
+            self._bounding_box_quick_edit
+            or (self.mode == _CanvasMode.CREATE and self.create_mode == "rectangle")
+            or (self.is_drawing_skeleton and self._skeleton_drawing_mode == "bbox")
+        ):
             pen = QtGui.QPen(QtGui.QColor(255, 235, 0))
             pen.setWidth(2)
             pen.setStyle(Qt.PenStyle.DotLine)
             return pen
         return QtGui.QPen(self.palette().color(QtGui.QPalette.ColorRole.WindowText))
+
+    def _draw_quick_edit_preview_layer(self, painter: QtGui.QPainter) -> None:
+        if not self._bounding_box_quick_edit or self._quick_edit_corner is None:
+            return
+        painter.save()
+        painter.setPen(self._crosshair_pen())
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(
+            QRectF(
+                self._quick_edit_corner * self.scale,
+                self._prev_move_point * self.scale,
+            ).normalized()
+        )
+        painter.restore()
 
     def _draw_center_dots_layer(self, painter: QtGui.QPainter) -> None:
         if not self._show_center_dots:
@@ -2312,6 +2428,8 @@ class Canvas(QtWidgets.QWidget):
             painter.restore()
 
     def _should_draw_crosshair(self, cursor: QPointF | None) -> bool:
+        if self._bounding_box_quick_edit:
+            return cursor is not None and not self._should_constrain_to_pixmap(cursor)
         if self.mode != _CanvasMode.CREATE:
             return False
         if self.is_drawing_skeleton:
@@ -2545,6 +2663,8 @@ class Canvas(QtWidgets.QWidget):
         self._is_moving_shape = True
 
     def keyPressEvent(self, a0: QtGui.QKeyEvent) -> None:
+        if self._bounding_box_quick_edit:
+            return
         modifiers = a0.modifiers()
         key = a0.key()
         if self.is_drawing_skeleton:
@@ -2713,6 +2833,9 @@ class Canvas(QtWidgets.QWidget):
         self.shapes = list(shapes) if replace else self.shapes + list(shapes)
         self.backup_shapes()
         self._reset_interaction_state()
+        if self._bounding_box_quick_edit:
+            self._quick_edit_corner = None
+            self._select_quick_edit_rectangle()
         self.update()
 
     def set_shape_visible(self, shape: Shape, value: bool) -> None:
@@ -2739,6 +2862,9 @@ class Canvas(QtWidgets.QWidget):
         QtWidgets.QApplication.restoreOverrideCursor()
 
     def reset_state(self) -> None:
+        self._bounding_box_quick_edit = False
+        self._quick_edit_index = 0
+        self._quick_edit_corner: QPointF | None = None
         self._release_cursor()
         self.pixmap = QtGui.QPixmap()
         self._pixmap_hash = None

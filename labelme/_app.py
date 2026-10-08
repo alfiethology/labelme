@@ -264,6 +264,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._runtime_label_colors: dict[str, tuple[int, int, int]] = {}
         self._zoom_speed = _DEFAULT_ZOOM_SPEED
         self._change_label_choices: dict[str, str] | None = None
+        self._bounding_box_quick_edit_active = False
         self._change_label_index = 0
         self._change_label_input = ""
         self._docks = self._setup_dock_widgets()
@@ -1024,9 +1025,19 @@ class MainWindow(QtWidgets.QMainWindow):
             ),
         )
         _utils.add_actions(help_menu, (help_, self._actions.about))
+        self._bounding_box_quick_edit_action = action(
+            self.tr("Bounding Box Quick Edit"),
+            self._toggle_bounding_box_quick_edit,
+            checkable=True,
+            tip=self.tr(
+                "Reposition rectangles with two clicks; "
+                "Space saves and opens the next image"
+            ),
+        )
         _utils.add_actions(
             tools_menu,
             (
+                self._bounding_box_quick_edit_action,
                 action(
                     self.tr("Change Labels…"),
                     self._change_labels,
@@ -1279,6 +1290,36 @@ class MainWindow(QtWidgets.QMainWindow):
                 ),
             )
 
+    def _toggle_bounding_box_quick_edit(self, enabled: bool) -> None:
+        if enabled and self._image.isNull():
+            self._bounding_box_quick_edit_action.setChecked(False)
+            self.show_status_message(
+                self.tr("Open an image before editing bounding boxes."), 5000
+            )
+            return
+        if enabled:
+            self._stop_change_labels()
+            self._switch_canvas_mode(edit=True)
+            self.toggle_zoom_rect(False)
+        self._bounding_box_quick_edit_active = enabled
+        self._bounding_box_quick_edit_action.setChecked(enabled)
+        self._canvas_widgets.canvas.set_bounding_box_quick_edit(enabled)
+        self._canvas_widgets.canvas.setFocus()
+
+    def _advance_bounding_box_quick_edit_image(self) -> None:
+        if self._image.isNull():
+            return
+        if self._is_changed:
+            if not self.save_labels(label_path=self.current_label_file_path()):
+                return
+            self.mark_clean()
+        if self._docks.file_list.currentRow() + 1 >= self._docks.file_list.count():
+            self.show_status_message(
+                self.tr("Bounding Box Quick Edit: reached the final image."), 5000
+            )
+            return
+        self._open_next_image()
+
     def _change_labels(self) -> None:
         if self._image.isNull():
             QtWidgets.QMessageBox.information(
@@ -1301,6 +1342,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.show_error_message(self.tr("Invalid label shortcut file"), str(error))
             return
 
+        self._toggle_bounding_box_quick_edit(False)
         self._change_label_choices = {key.casefold(): label for label, key in choices}
         self._change_label_index = 0
         self._change_label_input = ""
@@ -2978,13 +3020,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if self._actions.save_auto.isChecked():
             assert self._image_path is not None
-            self.save_labels(
+            saved = self.save_labels(
                 label_path=_resolve_label_path(
                     image_or_label_path=self._image_path,
                     output_dir=self._output_dir,
                 )
             )
-            return
+            if saved or not self._bounding_box_quick_edit_active:
+                return
         self._is_changed = True
         self._actions.save.setEnabled(True)
         self.setWindowTitle(self._get_window_title(dirty=True))
@@ -3151,6 +3194,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def _switch_canvas_mode(
         self, edit: bool = True, create_mode: str | None = None
     ) -> None:
+        if self._bounding_box_quick_edit_active:
+            self._toggle_bounding_box_quick_edit(False)
         if self._canvas_widgets.canvas.is_drawing_skeleton:
             self._canvas_widgets.canvas.cancel_skeleton_drawing()
         if create_mode == "ai_points_to_shape":
@@ -4067,7 +4112,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # it; otherwise an arrow-key walk of the list ends after one keypress.
         if not self._docks.file_list.hasFocus():
             self._canvas_widgets.canvas.setFocus()
-        if self._change_label_choices is not None:
+        if self._bounding_box_quick_edit_active:
+            self._canvas_widgets.canvas.set_bounding_box_quick_edit(True)
+            self._canvas_widgets.canvas.setFocus()
+        elif self._change_label_choices is not None:
             self._change_label_index = 0
             self._change_label_input = ""
             self._switch_canvas_mode(edit=True)
@@ -4288,6 +4336,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def close_file(self, _value: bool = False) -> None:
         if not self._can_continue():
             return
+        if self._bounding_box_quick_edit_active:
+            self._toggle_bounding_box_quick_edit(False)
         self.reset_state()
         self.mark_clean()
         self.update_action_states(False)
@@ -4623,6 +4673,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self._zoom_rect_button.setChecked(checked)
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if (
+            self._bounding_box_quick_edit_active
+            and watched is self._canvas_widgets.canvas
+            and isinstance(event, QtGui.QKeyEvent)
+            and event.type()
+            in (QtCore.QEvent.Type.ShortcutOverride, QtCore.QEvent.Type.KeyPress)
+            and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Escape)
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+        ):
+            event.accept()
+            if event.type() == QtCore.QEvent.Type.KeyPress and not event.isAutoRepeat():
+                if event.key() == Qt.Key.Key_Space:
+                    self._advance_bounding_box_quick_edit_image()
+                else:
+                    self._toggle_bounding_box_quick_edit(False)
+            return True
         if (
             self._change_label_choices is not None
             and watched is self._canvas_widgets.canvas

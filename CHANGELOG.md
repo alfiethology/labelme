@@ -9,12 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Tools > Bounding Box Quick Edit: reposition each rectangle with two corner clicks, then press Space to save and open the next image; yellow dotted crosshairs guide placement and Escape exits the mode.
+
 - Added Tools > Change Labels as an in-place review mode on the main Labelme canvas. Its shortcut file accepts case-insensitive letter-and-number sequences of any length; typing a sequence and confirming it with Enter or Space renames the selected shape and advances to the next shape, automatically saving and opening the next image after its final shape. Backspace corrects the sequence, shapes remain movable with normal editing controls, and Shift+Space moves a skipped image and annotation into a `skipped_images` directory alongside the current labels directory so skipped files are outside the active session tree.
 - Added Tools > Delete Unlabelled Images with a Yes/No confirmation before permanently deleting every image in the open directory that has no corresponding annotation file; the current image is protected when it has unsaved changes.
 - Expanded the Settings dialog with a scrollable page of workflow-oriented groups, an icon-labeled section index for quick navigation, and explanatory descriptions, so that auto-save, saving image data, keep-previous annotation/zoom/brightness-contrast, fill-drawing, label sorting/completion/text-field behavior, and the default AI model can all be changed in-app with immediate apply, instead of requiring hand-editing the config file ([#2403](https://github.com/wkentaro/labelme/pull/2403))
 
 ### Changed
 
+- Changed regular bounding box drawing to use yellow, two-pixel dotted crosshairs, matching Bounding Box Quick Edit.
 - Changed the cursor guide lines shown while drawing a Quick-Draw Skeleton bounding box to a brighter yellow, two-pixel dotted style so they remain visible over the animal.
 - Changed startup to remember the last successfully opened image directory and reopen it automatically on the next launch when no explicit file or directory is supplied; missing or moved directories are forgotten safely.
 - Changed the Settings dialog to keep a stable, resizable window size, with scrolling when the available height cannot fit its content ([#2403](https://github.com/wkentaro/labelme/pull/2403))
