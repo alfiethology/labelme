@@ -157,7 +157,7 @@ def test_drawing_uses_precise_click_position_without_preceding_move(
 
 @pytest.mark.gui
 def test_cursor_is_cross_when_hovering_in_create_mode(canvas: Canvas) -> None:
-    # Any mouse move in CREATE mode should engage CrossCursor.
+    # Drawing uses our centered cross rather than the platform's native cross.
     canvas.set_editing(value=False)
     canvas.create_mode = "rectangle"
     pos = _image_to_widget(canvas=canvas, img_x=50, img_y=25)
@@ -166,8 +166,92 @@ def test_cursor_is_cross_when_hovering_in_create_mode(canvas: Canvas) -> None:
 
     override = QtWidgets.QApplication.overrideCursor()
     assert override is not None
-    assert override.shape() == Qt.CursorShape.CrossCursor
+    assert override.shape() == Qt.CursorShape.BitmapCursor
+    image = override.pixmap().toImage()
+    center = image.width() // 2
+    assert image.width() == image.height() == 19
+    assert override.hotSpot() == QtCore.QPoint(center, center)
+    # Pixel centres lie at index + 0.5. Check the visible centre, rather than
+    # just the bitmap's middle index (which missed a half-pixel offset).
+    for vertical in (False, True):
+        weights = [
+            image.pixelColor(i, 3).alpha()
+            if vertical
+            else image.pixelColor(3, i).alpha()
+            for i in range(image.width())
+        ]
+        visible_center = sum((i + 0.5) * w for i, w in enumerate(weights)) / sum(
+            weights
+        )
+        assert visible_center == pytest.approx(center, abs=0.01)
     _clear_cursor_override(canvas=canvas)
+
+
+@pytest.mark.gui
+@pytest.mark.parametrize("scale", [0.65, 1.0, 2.5])
+@pytest.mark.parametrize("device_pixel_ratio", [1, 2])
+@pytest.mark.parametrize("mode", ["point", "rectangle"])
+def test_rendered_cursor_and_annotation_have_the_same_visible_center(
+    canvas: Canvas, scale: float, device_pixel_ratio: int, mode: str
+) -> None:
+    canvas.resize(400, 300)
+    canvas.scale = scale
+    canvas.set_editing(False)
+    canvas.create_mode = mode
+    pointer = QPointF(191, 145)
+    canvas.mouseMoveEvent(_make_move_event(pointer))
+    cursor = QtWidgets.QApplication.overrideCursor()
+    assert cursor is not None
+    canvas.mousePressEvent(_make_press_event(pointer, Qt.MouseButton.LeftButton))
+    if mode == "rectangle":
+        canvas.mousePressEvent(
+            _make_press_event(pointer + QPointF(30, 30), Qt.MouseButton.LeftButton)
+        )
+
+    images = []
+    for draw_cursor in (True, False):
+        image = QtGui.QImage(
+            400 * device_pixel_ratio,
+            300 * device_pixel_ratio,
+            QtGui.QImage.Format.Format_ARGB32,
+        )
+        image.setDevicePixelRatio(device_pixel_ratio)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(image)
+        try:
+            if draw_cursor:
+                painter.drawPixmap(pointer - QPointF(cursor.hotSpot()), cursor.pixmap())
+            else:
+                canvas._setup_world_transform(painter)
+                canvas._draw_committed_shapes_layer(painter)
+        finally:
+            painter.end()
+        images.append(image)
+
+    for vertical in (False, True):
+        centers = []
+        for index, image in enumerate(images):
+            # Sample the cursor arms and rectangle edges away from vertices.
+            offset = 5 if index == 0 else (15 if mode == "rectangle" else 0)
+            fixed = int((pointer.y() if vertical else pointer.x()) + offset)
+            expected = pointer.x() if vertical else pointer.y()
+            samples = range(
+                int((expected - 6) * device_pixel_ratio),
+                int((expected + 6) * device_pixel_ratio),
+            )
+            weights = [
+                image.pixelColor(i, fixed * device_pixel_ratio).alpha()
+                if vertical
+                else image.pixelColor(fixed * device_pixel_ratio, i).alpha()
+                for i in samples
+            ]
+            center = sum(
+                (i + 0.5) / device_pixel_ratio * w
+                for i, w in zip(samples, weights, strict=True)
+            ) / sum(weights)
+            centers.append(center)
+        assert centers[0] == pytest.approx(expected, abs=0.01)
+        assert centers[0] == pytest.approx(centers[1], abs=0.01)
 
 
 @pytest.mark.gui
@@ -542,7 +626,7 @@ def test_cursor_is_pointing_hand_when_snapping_to_polygon_origin(
     canvas: Canvas,
 ) -> None:
     # While drawing a polygon with 3+ points, approaching the first point
-    # within epsilon switches from CrossCursor to PointingHandCursor.
+    # Within epsilon switches from the drawing cross to PointingHandCursor.
     canvas.set_editing(value=False)
     canvas.create_mode = "polygon"
     canvas.scale = 1.0
@@ -565,7 +649,7 @@ def test_cursor_is_pointing_hand_when_snapping_to_polygon_origin(
 @pytest.mark.gui
 def test_cursor_is_cross_when_far_from_polygon_origin(canvas: Canvas) -> None:
     # When the cursor is more than epsilon/scale away from the polygon origin,
-    # CrossCursor is kept (no snap engagement).
+    # The drawing cross is kept (no snap engagement).
     canvas.set_editing(value=False)
     canvas.create_mode = "polygon"
     canvas.scale = 1.0
@@ -581,7 +665,7 @@ def test_cursor_is_cross_when_far_from_polygon_origin(canvas: Canvas) -> None:
 
     override = QtWidgets.QApplication.overrideCursor()
     assert override is not None
-    assert override.shape() == Qt.CursorShape.CrossCursor
+    assert override.shape() == Qt.CursorShape.BitmapCursor
     _clear_cursor_override(canvas=canvas)
 
 

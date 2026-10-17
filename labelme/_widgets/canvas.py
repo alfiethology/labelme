@@ -2849,12 +2849,16 @@ class Canvas(QtWidgets.QWidget):
     def _apply_cursor(self, role: CursorRole) -> None:
         if role == self._cursor:
             return
-        shape = _canvas_interaction.cursor_shape_for(role=role)
+        cursor = (
+            _canvas_interaction.make_drawing_cursor()
+            if role == CursorRole.DRAW
+            else QtGui.QCursor(_canvas_interaction.cursor_shape_for(role=role))
+        )
         # Push on first apply; swap the top of the stack we already own afterwards.
         if self._cursor == CursorRole.DEFAULT:
-            QtWidgets.QApplication.setOverrideCursor(shape)
+            QtWidgets.QApplication.setOverrideCursor(cursor)
         else:
-            QtWidgets.QApplication.changeOverrideCursor(shape)
+            QtWidgets.QApplication.changeOverrideCursor(cursor)
         self._cursor = role
 
     def _release_cursor(self) -> None:

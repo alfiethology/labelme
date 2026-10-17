@@ -7,6 +7,11 @@ from typing import Final
 import numpy as np
 import numpy.typing as npt
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
+from PySide6.QtGui import QCursor
+from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPen
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QMenu
 
 from .._shape import Shape
@@ -132,6 +137,28 @@ assert set(_CURSOR_SHAPE_MAP) == set(CursorRole), (
 
 def cursor_shape_for(role: CursorRole) -> Qt.CursorShape:
     return _CURSOR_SHAPE_MAP[role]
+
+
+def make_drawing_cursor() -> QCursor:
+    # Keep an odd-sized cursor with an explicit central hotspot.
+    size = 19
+    center = size // 2
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    try:
+        # Match canvas rasterization: aliased odd-width lines land half a pixel
+        # below/right of their coordinates, even with an exact integer hotspot.
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        for color, width in ((Qt.GlobalColor.white, 3), (Qt.GlobalColor.black, 1)):
+            pen = QPen(QColor(color), width)
+            pen.setCapStyle(Qt.PenCapStyle.SquareCap)
+            painter.setPen(pen)
+            painter.drawLine(1, center, size - 2, center)
+            painter.drawLine(center, 1, center, size - 2)
+    finally:
+        painter.end()
+    return QCursor(pixmap, center, center)
 
 
 @dataclasses.dataclass
