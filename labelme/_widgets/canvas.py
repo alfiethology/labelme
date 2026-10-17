@@ -283,6 +283,7 @@ class Canvas(QtWidgets.QWidget):
         self._ai_inference_failed = False
         self._snapping = True
         self._snap_to_existing_points = False
+        self._lock_cursor_to_pixels = False
         self._hovered_shape_is_selected: bool = False
         self._painter = QtGui.QPainter()
         self._pan_anchor = None
@@ -329,6 +330,17 @@ class Canvas(QtWidgets.QWidget):
 
     def set_snap_to_existing_points(self, value: bool) -> None:
         self._snap_to_existing_points = value
+
+    def set_lock_cursor_to_pixels(self, value: bool) -> None:
+        self._lock_cursor_to_pixels = value
+        if self._prev_move_point is not None:
+            self._prev_move_point = self._snap_point_to_pixel(self._prev_move_point)
+        self.update()
+
+    def _snap_point_to_pixel(self, point: QPointF) -> QPointF:
+        if not self._lock_cursor_to_pixels:
+            return point
+        return QPointF(round(point.x()), round(point.y()))
 
     def set_show_center_dots(self, value: bool) -> None:
         self._show_center_dots = value
@@ -1094,7 +1106,9 @@ class Canvas(QtWidgets.QWidget):
                 nearest_distance = distance
         if nearest_point is None or nearest_distance > self._epsilon:
             return None
-        return QPointF(float(nearest_point[0]), float(nearest_point[1]))
+        return self._snap_point_to_pixel(
+            QPointF(float(nearest_point[0]), float(nearest_point[1]))
+        )
 
     def _cursor_should_snap_to_polygon_origin(self, pos: QPointF) -> bool:
         if not self._snapping:
@@ -1122,6 +1136,9 @@ class Canvas(QtWidgets.QWidget):
     def _update_drawing_line(self, pos: QPointF, is_shift_pressed: bool) -> QPointF:
         current = self._current
         assert current is not None
+        pos = self._snap_point_to_pixel(pos)
+        if self._lock_cursor_to_pixels:
+            self._prev_move_point = pos
         mode = self.create_mode
         if mode in POLYLINE_SHAPE_TYPES:
             self._line = dataclasses.replace(
@@ -2070,6 +2087,7 @@ class Canvas(QtWidgets.QWidget):
                 pos=pos, opposite_vertex=QPointF(*shape.points[1 - vertex_index])
             )
 
+        pos = self._snap_point_to_pixel(pos)
         shape.move_vertex(i=vertex_index, pos=(pos.x(), pos.y()))
 
     def _bounded_move_skeleton_bbox_vertex(
@@ -2545,7 +2563,7 @@ class Canvas(QtWidgets.QWidget):
         origin = self._compute_image_origin_offset()
         image_x = point.x() / self.scale - origin.x()
         image_y = point.y() / self.scale - origin.y()
-        return QPointF(image_x, image_y)
+        return self._snap_point_to_pixel(QPointF(image_x, image_y))
 
     def _compute_image_origin_offset(self) -> QPointF:
         area = super().size()
@@ -2576,6 +2594,16 @@ class Canvas(QtWidgets.QWidget):
                 self._cancel_current_shape()
                 return
         else:
+            # Geometric projections (e.g. oriented corners or clipped edges)
+            # can introduce fractions after the cursor position was snapped.
+            if self._lock_cursor_to_pixels:
+                self._current = dataclasses.replace(
+                    self._current,
+                    points=tuple(
+                        self._snap_point_to_pixel(point)
+                        for point in self._current.points
+                    ),
+                )
             self._current = self._current.close()
             if _is_degenerate_draft(self._current):
                 self.degenerate_shape_rejected.emit()

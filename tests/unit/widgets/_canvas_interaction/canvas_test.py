@@ -112,13 +112,15 @@ def _clear_cursor_override(canvas: Canvas) -> None:
 @pytest.mark.gui
 @pytest.mark.parametrize("scale", [0.65, 1.0, 2.5])
 @pytest.mark.parametrize("mode", ["point", "line", "linestrip", "rectangle", "circle"])
+@pytest.mark.parametrize("pixel_lock", [False, True])
 def test_drawing_uses_precise_click_position_without_preceding_move(
-    canvas: Canvas, mode: str, scale: float
+    canvas: Canvas, mode: str, scale: float, pixel_lock: bool
 ) -> None:
     canvas.scale = scale
     canvas.resize(401, 303)
     canvas.set_editing(False)
     canvas.create_mode = mode
+    canvas.set_lock_cursor_to_pixels(pixel_lock)
     first = QPointF(20.25, 15.75)
     last = QPointF(75.5, 40.25)
     canvas.mousePressEvent(
@@ -143,11 +145,40 @@ def test_drawing_uses_precise_click_position_without_preceding_move(
     expected = [[first.x(), first.y()]]
     if mode != "point":
         expected.append([last.x(), last.y()])
+    if pixel_lock:
+        expected = np.rint(expected).tolist()
     np.testing.assert_allclose(points, expected)
-    expected_crosshair = first if mode == "point" else last
+    expected_crosshair = QPointF(*expected[-1])
     assert canvas._prev_move_point is not None
     assert canvas._prev_move_point.x() == pytest.approx(expected_crosshair.x())
     assert canvas._prev_move_point.y() == pytest.approx(expected_crosshair.y())
+
+
+@pytest.mark.gui
+def test_pixel_lock_rounds_line_endpoint_after_clipping_to_image(
+    canvas: Canvas,
+) -> None:
+    canvas.set_editing(False)
+    canvas.create_mode = "line"
+    canvas.set_lock_cursor_to_pixels(True)
+    for pos in (QPointF(20.2, 15.7), QPointF(240.1, 80.3)):
+        canvas.mousePressEvent(_make_press_event(pos, Qt.MouseButton.LeftButton))
+
+    points = canvas.shapes[-1].points
+    np.testing.assert_array_equal(points, np.rint(points))
+    assert points[-1, 0] == _W
+
+
+@pytest.mark.gui
+def test_toggling_pixel_lock_preserves_existing_annotations(canvas: Canvas) -> None:
+    original = np.array([[20.25, 15.75]])
+    canvas.shapes = [Shape(shape_type="point", points=original.copy())]
+
+    canvas.set_lock_cursor_to_pixels(True)
+    np.testing.assert_array_equal(canvas.shapes[0].points, original)
+    canvas.set_lock_cursor_to_pixels(False)
+    pos = QPointF(25.25, 16.75)
+    assert canvas._transform_point_widget_to_image(pos) == pos
 
 
 # ---------------------------------------------------------------------------

@@ -238,6 +238,13 @@ Everything else, including the Python import surface, is internal and may change
 Run `labelme --help` for detail.\
 The annotations are saved as a [JSON](http://www.json.org/) file.
 
+Enable **Edit > Lock Cursor to Pixels** near the bottom of the Edit menu to
+snap cursor placement to the nearest whole image-pixel coordinate, at any zoom
+level. New manually drawn points and shapes then save whole-pixel coordinates
+such as `145.0` instead of fractional values such as `145.5475434` in annotation
+JSON files. The option is off by default; uncheck it to restore subpixel
+placement. Enabling it does not round existing annotations or AI predictions.
+
 To align polygon edges precisely, enable **Edit > Snap to Existing Points**;
 new polygon vertices will snap onto nearby vertices in existing annotations.
 In edit mode, an existing polygon vertex also snaps into the exact position of a

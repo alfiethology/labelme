@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a checkable Edit > Lock Cursor to Pixels option to snap cursor placement and new manual annotations to whole image-pixel coordinates, with usage documented in the README.
 - Added Tools > Bounding Box Quick Edit: reposition each rectangle with two corner clicks, then press Space to save and open the next image; yellow dotted crosshairs guide placement and Escape exits the mode.
 
 - Added Tools > Change Labels as an in-place review mode on the main Labelme canvas. Its shortcut file accepts case-insensitive letter-and-number sequences of any length; typing a sequence and confirming it with Enter or Space renames the selected shape and advances to the next shape, automatically saving and opening the next image after its final shape. Backspace corrects the sequence, shapes remain movable with normal editing controls, and Shift+Space moves a skipped image and annotation into a `skipped_images` directory alongside the current labels directory so skipped files are outside the active session tree.

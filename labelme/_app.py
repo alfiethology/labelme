@@ -173,6 +173,7 @@ class _Actions(NamedTuple):
     fill_drawing: QtGui.QAction
     fill_editing: QtGui.QAction
     snap_to_existing_points: QtGui.QAction
+    lock_cursor_to_pixels: QtGui.QAction
     show_center_dots: QtGui.QAction
     hide_all: QtGui.QAction
     show_all: QtGui.QAction
@@ -762,6 +763,14 @@ class MainWindow(QtWidgets.QMainWindow):
             checkable=True,
             checked=False,
         )
+        lock_cursor_to_pixels = action(
+            self.tr("Lock Cursor to Pixels"),
+            self._canvas_widgets.canvas.set_lock_cursor_to_pixels,
+            None,
+            tip=self.tr("Snap cursor placement to whole image-pixel coordinates"),
+            checkable=True,
+            checked=False,
+        )
         show_center_dots = action(
             self.tr("Show Center Dots"),
             self._canvas_widgets.canvas.set_show_center_dots,
@@ -886,6 +895,7 @@ class MainWindow(QtWidgets.QMainWindow):
             remove_point,
             None,
             snap_to_existing_points,
+            lock_cursor_to_pixels,
             keep_prev_action,
             zoom_speed_menu,
         )
@@ -936,6 +946,7 @@ class MainWindow(QtWidgets.QMainWindow):
             fill_drawing=fill_drawing,
             fill_editing=fill_editing,
             snap_to_existing_points=snap_to_existing_points,
+            lock_cursor_to_pixels=lock_cursor_to_pixels,
             show_center_dots=show_center_dots,
             hide_all=hide_all,
             show_all=show_all,
