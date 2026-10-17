@@ -109,6 +109,47 @@ def _clear_cursor_override(canvas: Canvas) -> None:
     canvas._release_cursor()
 
 
+@pytest.mark.gui
+@pytest.mark.parametrize("scale", [0.65, 1.0, 2.5])
+@pytest.mark.parametrize("mode", ["point", "line", "linestrip", "rectangle", "circle"])
+def test_drawing_uses_precise_click_position_without_preceding_move(
+    canvas: Canvas, mode: str, scale: float
+) -> None:
+    canvas.scale = scale
+    canvas.resize(401, 303)
+    canvas.set_editing(False)
+    canvas.create_mode = mode
+    first = QPointF(20.25, 15.75)
+    last = QPointF(75.5, 40.25)
+    canvas.mousePressEvent(
+        _make_press_event(
+            _image_to_widget(canvas, first.x(), first.y()), Qt.MouseButton.LeftButton
+        )
+    )
+    if mode != "point":
+        # The last preview differs from the subsequent click.
+        canvas.mouseMoveEvent(_make_move_event(_image_to_widget(canvas, 60.0, 30.0)))
+        canvas.mousePressEvent(
+            _make_press_event(
+                _image_to_widget(canvas, last.x(), last.y()), Qt.MouseButton.LeftButton
+            )
+        )
+    if mode == "linestrip":
+        assert canvas._current is not None
+        points = np.array([(p.x(), p.y()) for p in canvas._current.points])
+    else:
+        points = canvas.shapes[-1].points
+
+    expected = [[first.x(), first.y()]]
+    if mode != "point":
+        expected.append([last.x(), last.y()])
+    np.testing.assert_allclose(points, expected)
+    expected_crosshair = first if mode == "point" else last
+    assert canvas._prev_move_point is not None
+    assert canvas._prev_move_point.x() == pytest.approx(expected_crosshair.x())
+    assert canvas._prev_move_point.y() == pytest.approx(expected_crosshair.y())
+
+
 # ---------------------------------------------------------------------------
 # Cursor shape -- create (drawing) mode
 # ---------------------------------------------------------------------------

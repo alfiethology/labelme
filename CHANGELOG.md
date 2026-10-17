@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Reduced yellow drawing crosshairs from two pixels to one pixel thick.
 - Changed regular bounding box drawing to use yellow, two-pixel dotted crosshairs, matching Bounding Box Quick Edit.
 - Changed the cursor guide lines shown while drawing a Quick-Draw Skeleton bounding box to a brighter yellow, two-pixel dotted style so they remain visible over the animal.
 - Changed startup to remember the last successfully opened image directory and reopen it automatically on the next launch when no explicit file or directory is supplied; missing or moved directories are forgotten safely.
@@ -30,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed crosshair alignment with placed points and lines at fractional zoom levels and centered image offsets, and drawing endpoints using a stale mouse-move position instead of the click position.
 - Fixed Shift+Space in Change Labels mode removing the skipped image from the file list without loading its successor; the replacement row is now selected silently and loaded explicitly, including when removing a row causes the next item to inherit the same index.
 - Fixed YOLO pose export treating unrelated JSON files such as `summary.json` as Labelme annotations and crashing on a missing `imagePath`; unrelated JSON is now ignored, while malformed annotation errors are shown in-app instead of closing Labelme. Mixed files remain supported: only Skeleton Shapes are exported and OBB/other shapes are ignored.
 - Fixed labelme refusing to start (exiting with status 1 and `Config file does not exist`) when `~/.labelmerc` does not exist and could not be created, such as on a read-only or otherwise unwritable home directory; the auto-discovered config path was the default value of `--config`, so a missing one was treated like an explicitly requested file that is missing. A missing file is now fatal only when it was explicitly passed via `--config`, while a missing default path logs a warning and starts on the built-in default settings ([#2421](https://github.com/wkentaro/labelme/pull/2421))

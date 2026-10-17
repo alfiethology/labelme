@@ -1403,6 +1403,7 @@ class Canvas(QtWidgets.QWidget):
 
     def mousePressEvent(self, a0: QtGui.QMouseEvent) -> None:
         pos: QPointF = self._transform_point_widget_to_image(a0.position())
+        self._prev_move_point = pos
         self._dispatch_pointer_press(pos=pos, event=a0)
         self._update_status()
 
@@ -1476,9 +1477,9 @@ class Canvas(QtWidgets.QWidget):
         is_shift_pressed: bool,
     ) -> None:
         if self._current is not None:
-            if self.create_mode == "polygon":
-                pos = self._project_drawing_pos_into_image(pos=pos)
-                self._update_drawing_line(pos=pos, is_shift_pressed=is_shift_pressed)
+            # A press can arrive at a newer position than the last move event.
+            pos = self._project_drawing_pos_into_image(pos=pos)
+            self._update_drawing_line(pos=pos, is_shift_pressed=is_shift_pressed)
             self._extend_current_shape(current=self._current, event=event)
             return
         if self._should_constrain_to_pixmap(pos):
@@ -2360,23 +2361,24 @@ class Canvas(QtWidgets.QWidget):
             return
         assert cursor is not None
         painter.setPen(self._crosshair_pen())
-        cx = int(cursor.x() * self.scale)
-        cy = int(cursor.y() * self.scale)
+        # Keep the same subpixel coordinates used to render shape vertices.
+        cx = cursor.x() * self.scale
+        cy = cursor.y() * self.scale
         if self._allow_out_of_bounds_points:
             # The cursor may be in the margin around the image, so span the whole
             # viewport instead of stopping the lines at the image edge.
             offset = self._compute_image_origin_offset() * self.scale
             area = super().size()
-            left = int(-offset.x())
-            top = int(-offset.y())
-            right = int(-offset.x() + area.width())
-            bottom = int(-offset.y() + area.height())
+            left = -offset.x()
+            top = -offset.y()
+            right = left + area.width()
+            bottom = top + area.height()
         else:
-            left = top = 0
-            right = int(self.pixmap.width() * self.scale) - 1
-            bottom = int(self.pixmap.height() * self.scale) - 1
-        painter.drawLine(left, cy, right, cy)
-        painter.drawLine(cx, top, cx, bottom)
+            left = top = 0.0
+            right = self.pixmap.width() * self.scale - 1
+            bottom = self.pixmap.height() * self.scale - 1
+        painter.drawLine(QPointF(left, cy), QPointF(right, cy))
+        painter.drawLine(QPointF(cx, top), QPointF(cx, bottom))
 
     def _crosshair_pen(self) -> QtGui.QPen:
         if (
@@ -2385,7 +2387,7 @@ class Canvas(QtWidgets.QWidget):
             or (self.is_drawing_skeleton and self._skeleton_drawing_mode == "bbox")
         ):
             pen = QtGui.QPen(QtGui.QColor(255, 235, 0))
-            pen.setWidth(2)
+            pen.setWidth(1)
             pen.setStyle(Qt.PenStyle.DotLine)
             return pen
         return QtGui.QPen(self.palette().color(QtGui.QPalette.ColorRole.WindowText))

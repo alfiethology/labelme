@@ -515,7 +515,7 @@ def test_quick_skeleton_crosshair_appears_only_for_bounding_box(
 
 
 @pytest.mark.gui
-def test_quick_skeleton_bounding_box_crosshair_is_yellow_dotted_and_thicker(
+def test_quick_skeleton_bounding_box_crosshair_is_yellow_dotted_and_one_pixel(
     canvas: Canvas,
 ) -> None:
     canvas.start_skeleton_drawing(node_names=("snout",))
@@ -524,8 +524,33 @@ def test_quick_skeleton_bounding_box_crosshair_is_yellow_dotted_and_thicker(
     pen = canvas._crosshair_pen()
 
     assert pen.color() == QtGui.QColor(255, 235, 0)
-    assert pen.width() == 2
+    assert pen.width() == 1
     assert pen.style() == Qt.PenStyle.DotLine
+
+
+@pytest.mark.gui
+@pytest.mark.parametrize("scale", [0.65, 1.0, 2.5])
+@pytest.mark.parametrize("allow_out_of_bounds", [False, True])
+def test_crosshair_intersection_matches_pointer_position(
+    canvas: Canvas, scale: float, allow_out_of_bounds: bool
+) -> None:
+    canvas.scale = scale
+    canvas.resize(401, 303)
+    canvas.set_editing(False)
+    canvas.create_mode = "rectangle"
+    canvas.set_allow_out_of_bounds_points(allow_out_of_bounds)
+    # A fractional widget position and centered image expose rounding drift.
+    pointer = QPointF(191.75, 145.25)
+    canvas._prev_move_point = canvas._transform_point_widget_to_image(pointer)
+    painter = Mock()
+
+    canvas._draw_crosshair_layer(painter)
+
+    horizontal, vertical = painter.drawLine.call_args_list
+    origin = canvas._compute_image_origin_offset() * scale
+    intersection = QPointF(vertical.args[0].x(), horizontal.args[0].y()) + origin
+    assert intersection.x() == pytest.approx(pointer.x())
+    assert intersection.y() == pytest.approx(pointer.y())
 
 
 @pytest.mark.gui
