@@ -169,7 +169,7 @@ def test_cursor_is_cross_when_hovering_in_create_mode(canvas: Canvas) -> None:
     assert override.shape() == Qt.CursorShape.BitmapCursor
     image = override.pixmap().toImage()
     center = image.width() // 2
-    assert image.width() == image.height() == 19
+    assert image.width() == image.height() == 23
     assert override.hotSpot() == QtCore.QPoint(center, center)
     # Pixel centres lie at index + 0.5. Check the visible centre, rather than
     # just the bitmap's middle index (which missed a half-pixel offset).

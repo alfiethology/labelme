@@ -141,7 +141,7 @@ def cursor_shape_for(role: CursorRole) -> Qt.CursorShape:
 
 def make_drawing_cursor() -> QCursor:
     # Keep an odd-sized cursor with an explicit central hotspot.
-    size = 19
+    size = 23
     center = size // 2
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)

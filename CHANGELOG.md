@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Reduced yellow drawing crosshairs from two pixels to one pixel thick.
-- Replaced the system drawing cursor with a 19-by-19-pixel cross with one-pixel black strokes and a white outline, using the same antialiasing as the canvas so its visible centre matches the click hotspot on both axes.
+- Replaced the system drawing cursor with a 23-by-23-pixel cross with one-pixel black strokes and a white outline, using the same antialiasing as the canvas so its visible centre matches the click hotspot on both axes.
 - Changed regular bounding box drawing to use yellow, two-pixel dotted crosshairs, matching Bounding Box Quick Edit.
 - Changed the cursor guide lines shown while drawing a Quick-Draw Skeleton bounding box to a brighter yellow, two-pixel dotted style so they remain visible over the animal.
 - Changed startup to remember the last successfully opened image directory and reopen it automatically on the next launch when no explicit file or directory is supplied; missing or moved directories are forgotten safely.
