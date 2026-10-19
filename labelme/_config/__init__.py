@@ -10,6 +10,7 @@ from loguru import logger
 
 from .. import _yaml
 from ._shape_color import migrate_shape_color
+from ._shape_color import validate_point_colors_by_label
 from ._shape_color import validate_shape_color
 from ._writer import set_overrides
 
@@ -57,6 +58,8 @@ def _validate_config_item(key: str, value: object) -> None:
         or value not in (1, 2, 3, 4)
     ):
         raise ValueError("canvas.zoom_speed must be an integer from 1 to 4")
+    if key == "point_colors_by_label":
+        validate_point_colors_by_label(value)
     if key == "validate_label" and value not in [None, "exact"]:
         raise ValueError(f"Unexpected value for config key 'validate_label': {value}")
     if key == "labels" and value is not None:

@@ -225,6 +225,9 @@ class Canvas(QtWidgets.QWidget):
     _highlight: VertexHighlight | None
     _rotation_highlight: VertexHighlight | None
     _color_resolver: Callable[[str], tuple[int, int, int]] | None
+    _point_color_resolver: (
+        Callable[[str], tuple[QtGui.QColor, QtGui.QColor] | None] | None
+    )
     _point_size: int
     _point_type: Literal["square", "round"]
     _draft_palette: Palette
@@ -292,6 +295,7 @@ class Canvas(QtWidgets.QWidget):
         self._zoom_rect_end: QPointF | None = None
         self._show_center_dots = False
         self._color_resolver: Callable[[str], tuple[int, int, int]] | None = None
+        self._point_color_resolver = None
         self._point_size: int = 8
         self._point_type: Literal["square", "round"] = "round"
         self._skeleton_node_size = 8
@@ -370,6 +374,12 @@ class Canvas(QtWidgets.QWidget):
     def set_point_size(self, point_size: int) -> None:
         self._point_size = point_size
 
+    def set_point_color_resolver(
+        self, resolver: Callable[[str], tuple[QtGui.QColor, QtGui.QColor] | None]
+    ) -> None:
+        self._point_color_resolver = resolver
+        self._palette_cache.clear()
+
     @property
     def skeleton_node_size(self) -> int:
         return self._skeleton_node_size
@@ -395,11 +405,22 @@ class Canvas(QtWidgets.QWidget):
         # resolution into one lookup per distinct label per frame.
         palette = self._palette_cache.get(label)
         if palette is None:
+            point_colors = (
+                self._point_color_resolver(label)
+                if self._point_color_resolver
+                else None
+            )
             palette = dataclasses.replace(
                 Palette.from_rgb(rgb=self._color_resolver(label)),
-                vertex_fill=self._draft_palette.vertex_fill,
+                vertex_fill=(
+                    point_colors[0] if point_colors else self._draft_palette.vertex_fill
+                ),
                 hvertex_fill=self._draft_palette.hvertex_fill,
-                vertex_outline=self._draft_palette.vertex_outline,
+                vertex_outline=(
+                    point_colors[1]
+                    if point_colors
+                    else self._draft_palette.vertex_outline
+                ),
             )
             self._palette_cache[label] = palette
         return palette

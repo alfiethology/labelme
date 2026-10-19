@@ -30,6 +30,8 @@ shape:
   fill_color: [0, 0, 0, 64]
   vertex_fill_color: [255, 255, 0, 255]
   vertex_outline_color: [0, 0, 0, 255]
+  # Per-class inner and outer point colours, set by Change Class Color.
+  point_colors_by_label:
   # selecting / hovering
   select_line_color: [255, 255, 0, 255]
   select_fill_color: [255, 255, 0, 64]

@@ -13,6 +13,7 @@ from ruamel.yaml.comments import CommentedSeq
 
 from .. import _yaml
 from ._shape_color import migrate_shape_color
+from ._shape_color import validate_point_colors_by_label
 from ._shape_color import validate_shape_color
 
 here = Path(__file__).resolve().parent
@@ -100,6 +101,8 @@ def set_overrides(
     for key_path, value in overrides:
         if not key_path:
             raise ValueError("key_path must not be empty")
+        if tuple(key_path) == ("shape", "point_colors_by_label"):
+            validate_point_colors_by_label(value)
         if value == _default_value(key_path=key_path):
             _prune(doc=doc, key_path=key_path)
         else:

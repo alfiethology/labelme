@@ -23,6 +23,21 @@ def _validate_rgb(*, path: str, value: object) -> None:
         raise ValueError(f"{path} must be a list of three integers from 0 to 255")
 
 
+def validate_point_colors_by_label(value: object) -> None:
+    if value is None:
+        return
+    path = "shape.point_colors_by_label"
+    if not isinstance(value, dict):
+        raise ValueError(f"{path} must be a mapping")
+    for label, colors in value.items():
+        if not isinstance(label, str) or not label:
+            raise ValueError(f"{path} keys must be non-empty strings")
+        if not isinstance(colors, dict) or set(colors) != {"inner", "outer"}:
+            raise ValueError(f"{path}.{label} must contain inner and outer colours")
+        for name, color in colors.items():
+            _validate_rgb(path=f"{path}.{label}.{name}", value=color)
+
+
 def validate_shape_color(*, config: object) -> None:
     if not isinstance(config, dict):
         raise ValueError("shape_color must be a mapping")

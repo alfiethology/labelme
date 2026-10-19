@@ -81,6 +81,7 @@ from ._widgets import download_ai_model
 from ._widgets import format_shape_label
 from ._widgets import read_label_shortcuts
 from ._widgets._shape_render import SKELETON_NODE_LABEL_FONT_SIZE
+from ._widgets.class_color_dialog import ClassColorDialog
 from ._yolo_predictions import shapes_from_yolo_result
 
 
@@ -261,7 +262,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._point_mode_label_state: (
             tuple[str, dict[str, bool], int | None, str] | None
         ) = None
-        self._runtime_label_colors: dict[str, tuple[int, int, int]] = {}
         self._zoom_speed = self._config["canvas"]["zoom_speed"]
         self._change_label_choices: dict[str, str] | None = None
         self._bounding_box_quick_edit_active = False
@@ -2808,6 +2808,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 label=label, unique_label_list=self._docks.unique_label_list
             )
         )
+        canvas.set_point_color_resolver(self._get_point_colors_by_label)
         canvas.zoom_request.connect(self._zoom_requested)
         canvas.zoom_rect_selected.connect(self.zoom_to_rect)
         canvas.mouse_moved.connect(self._update_status_stats)
@@ -3282,21 +3283,25 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if picked != change_color:
             return
-        current_rgb = self._get_rgb_by_label(
-            label=label, unique_label_list=self._docks.unique_label_list
+        canvas = self._canvas_widgets.canvas
+        palette = canvas._resolve_palette(label)
+        dialog = ClassColorDialog(
+            label=label,
+            inner=palette.vertex_fill,
+            outer=palette.vertex_outline,
+            parent=self,
         )
-        color = QtWidgets.QColorDialog.getColor(
-            QtGui.QColor(*current_rgb),
-            self,
-            self.tr("Choose Color for '{}'").format(label),
-        )
-        if not color.isValid():
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-        self._runtime_label_colors[label] = (
-            color.red(),
-            color.green(),
-            color.blue(),
-        )
+        colors = dict(self._config["shape"]["point_colors_by_label"] or {})
+        colors[label] = dialog.colours()
+        key_path = ("shape", "point_colors_by_label")
+        if self._is_settings_editable and not self._try_set_overrides(
+            overrides=[(key_path, colors)]
+        ):
+            return
+        self._set_setting_value(key_path, colors)
+        canvas.set_point_color_resolver(self._get_point_colors_by_label)
         self._refresh_class_color(label=label)
 
     def _draft_palette_from_config(self) -> Palette:
@@ -3560,8 +3565,9 @@ class MainWindow(QtWidgets.QMainWindow):
         label: str,
         unique_label_list: UniqueLabelQListWidget,
     ) -> tuple[int, int, int]:
-        if label in self._runtime_label_colors:
-            return self._runtime_label_colors[label]
+        point_colors = (self._config["shape"]["point_colors_by_label"] or {}).get(label)
+        if point_colors is not None:
+            return tuple(point_colors["inner"])
         item = unique_label_list.find_label_item(label)
         label_index: int = (
             unique_label_list.indexFromItem(item).row()
@@ -3573,6 +3579,14 @@ class MainWindow(QtWidgets.QMainWindow):
             label=label,
             label_index=label_index,
         )
+
+    def _get_point_colors_by_label(
+        self, label: str
+    ) -> tuple[QtGui.QColor, QtGui.QColor] | None:
+        colors = (self._config["shape"]["point_colors_by_label"] or {}).get(label)
+        if colors is None:
+            return None
+        return QtGui.QColor(*colors["inner"]), QtGui.QColor(*colors["outer"])
 
     def _refresh_class_color(self, *, label: str) -> None:
         rgb = self._get_rgb_by_label(

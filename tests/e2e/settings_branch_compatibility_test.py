@@ -34,6 +34,9 @@ def test_snap_preferences_persist_with_point_colours_from_another_branch(
     assert win._is_settings_editable
     assert win._config["auto_save"] is False
     assert win._config["with_image_data"] is True
+    palette = win._canvas_widgets.canvas._resolve_palette("hen_point")
+    assert palette.vertex_fill.getRgb() == (230, 97, 0, 255)
+    assert palette.vertex_outline.getRgb() == (249, 240, 107, 255)
     for key in ("snap_to_existing_points", "lock_cursor_to_pixels"):
         action = getattr(win._actions, key)
         assert not action.isChecked()
@@ -48,6 +51,7 @@ def test_snap_preferences_persist_with_point_colours_from_another_branch(
     assert saved["canvas"]["lock_cursor_to_pixels"] is True
     reopened = main_win(config_file=config_file if explicit_config else None)
     assert reopened._is_settings_editable
+    assert reopened._canvas_widgets.canvas._resolve_palette("hen_point") == palette
     for key in ("snap_to_existing_points", "lock_cursor_to_pixels"):
         assert getattr(reopened._actions, key).isChecked()
         assert getattr(reopened._canvas_widgets.canvas, f"_{key}") is True

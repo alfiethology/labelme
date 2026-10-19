@@ -265,6 +265,11 @@ skeleton nodes, including existing shapes, and are saved for future sessions.
 Hover highlights and red negative/occluded points retain their status colours
 inside the selected outer ring.
 
+To choose a separate pair for a class, right-click it in the class list and
+select **Change Class Color…**. Choose **Inner point / class colour** and
+**Point outer ring colour**, then click **OK**. Both colours are saved for that
+class and restored when Labelme reopens; other classes keep their colours.
+
 ```bash
 labelme  # just open gui
 

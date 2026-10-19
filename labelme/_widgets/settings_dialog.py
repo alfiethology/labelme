@@ -11,17 +11,9 @@ from PySide6 import QtWidgets
 from .. import _locale
 from .._config import _schema as schema
 from .._utils.qt import new_icon
+from ._color_button import ColorButton as _ColorButton
 
 ApplySetting = Callable[[tuple[str, ...], object], bool]
-
-
-class _ColorButton(QtWidgets.QPushButton):
-    def set_color(self, color: QtGui.QColor) -> None:
-        self.color = color
-        self.setText(color.name().upper())
-        swatch = QtGui.QPixmap(20, 20)
-        swatch.fill(color)
-        self.setIcon(QtGui.QIcon(swatch))
 
 
 class _PlainTextEdit(QtWidgets.QPlainTextEdit):
