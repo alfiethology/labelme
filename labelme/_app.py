@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import enum
 import functools
 import json
@@ -37,6 +38,7 @@ from . import _ai_models
 from . import _automation
 from . import _config
 from . import _utils
+from ._config import _schema as config_schema
 from ._frame_refinement import FrameInferenceWorker
 from ._frame_refinement import FramePrediction
 from ._frame_refinement import VideoInferenceWorker
@@ -82,6 +84,9 @@ from ._widgets import format_shape_label
 from ._widgets import read_label_shortcuts
 from ._widgets._shape_render import SKELETON_NODE_LABEL_FONT_SIZE
 from ._widgets.class_color_dialog import ClassColorDialog
+from ._widgets.command_palette import Command
+from ._widgets.command_palette import CommandPalette
+from ._widgets.command_palette import collect_action_commands
 from ._yolo_predictions import shapes_from_yolo_result
 
 
@@ -127,6 +132,7 @@ class _DockWidgets(NamedTuple):
 
 
 class _Actions(NamedTuple):
+    command_palette: QtGui.QAction
     about: QtGui.QAction
     save: QtGui.QAction
     save_as: QtGui.QAction
@@ -378,6 +384,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def _setup_actions(self) -> _Actions:
         action = functools.partial(_utils.new_action, self)
         shortcuts = self._config["shortcuts"]
+        command_palette = action(
+            text=self.tr("Command Palette…"),
+            slot=self._open_command_palette,
+            shortcut=shortcuts["command_palette"],
+            tip=self.tr("Search commands, tools, and settings"),
+        )
 
         about = action(
             text=f"&About {__appname__}",
@@ -887,6 +899,8 @@ class MainWindow(QtWidgets.QMainWindow):
             remove_point,
         )
         edit_menu = (
+            command_palette,
+            None,
             edit,
             duplicate,
             copy,
@@ -904,6 +918,7 @@ class MainWindow(QtWidgets.QMainWindow):
             zoom_speed_menu,
         )
         return _Actions(
+            command_palette=command_palette,
             about=about,
             save=save,
             save_as=save_as,
@@ -4679,6 +4694,75 @@ class MainWindow(QtWidgets.QMainWindow):
             assert item is not None
             flags[item.text()] = item.checkState() == Qt.CheckState.Checked
         return flags
+
+    def _command_palette_commands(self) -> list[Command]:
+        commands = collect_action_commands(
+            self.menuBar(),
+            self.findChildren(QtWidgets.QToolBar),
+            exclude=self._actions.command_palette,
+        )
+        indexed_actions = {
+            command.action: index for index, command in enumerate(commands)
+        }
+        for setting in config_schema.SETTINGS:
+            label = QtCore.QCoreApplication.translate("SettingsDialog", setting.label)
+            group = QtCore.QCoreApplication.translate("SettingsDialog", setting.group)
+            action = self._persistent_actions.get(setting.key_path)
+            if action in indexed_actions:
+                index = indexed_actions[action]
+                commands[index] = dataclasses.replace(
+                    commands[index],
+                    keywords=f"Settings {label} {setting.label} {group}",
+                )
+                continue
+            callback: typing.Callable[[], object]
+            checked: bool | None = None
+            if setting.kind == "bool":
+                checked = bool(self._read_setting_value(setting.key_path))
+                callback = functools.partial(
+                    self._toggle_palette_setting, setting.key_path
+                )
+            else:
+                callback = functools.partial(self._open_settings_at, setting.key_path)
+            commands.append(
+                Command(
+                    title=label,
+                    section=f"{self.tr('Settings')} › {group}",
+                    callback=callback,
+                    enabled=self._is_settings_editable,
+                    checked=checked,
+                    keywords=f"{setting.label} {setting.group}",
+                )
+            )
+        commands.append(
+            Command(
+                title=self.tr("Open config file as text…"),
+                section=self.tr("Settings"),
+                callback=self._open_config_file,
+                enabled=self._is_settings_editable,
+            )
+        )
+        return commands
+
+    def _toggle_palette_setting(self, key_path: tuple[str, ...]) -> None:
+        self._apply_setting_change(
+            key_path=key_path, value=not bool(self._read_setting_value(key_path))
+        )
+
+    def _open_command_palette(self) -> None:
+        dialog = CommandPalette(self._command_palette_commands(), parent=self)
+        dialog.exec()
+        selected = dialog.selected_command
+        dialog.deleteLater()
+        # The palette must be closed before triggering commands that open a
+        # dialog, change focus, or close the main window.
+        if selected is not None:
+            selected.invoke()
+
+    def _open_settings_at(self, key_path: tuple[str, ...]) -> None:
+        self._open_settings()
+        if self._settings_dialog is not None:
+            self._settings_dialog.focus_setting(key_path)
 
     def _open_settings(self) -> None:
         if not self._is_settings_editable:

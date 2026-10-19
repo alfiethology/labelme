@@ -74,7 +74,31 @@ def _validate_config_item(key: str, value: object) -> None:
             )
 
 
+def _migrate_command_palette_shortcut(config: dict) -> None:
+    shortcuts = config.get("shortcuts")
+    if not isinstance(shortcuts, dict):
+        return
+    old = shortcuts.get("toggle_keep_prev_mode")
+    keys = old if isinstance(old, list) else [old]
+    if not any(
+        isinstance(key, str) and key.replace(" ", "").casefold() == "ctrl+p"
+        for key in keys
+    ):
+        return
+    migrated: list = []
+    for key in keys:
+        if isinstance(key, str) and key.replace(" ", "").casefold() == "ctrl+p":
+            key = "Ctrl+Shift+P"
+        if key not in migrated:
+            migrated.append(key)
+    shortcuts["toggle_keep_prev_mode"] = (
+        migrated if isinstance(old, list) else migrated[0]
+    )
+    logger.info("Moving Keep Previous Annotation from Ctrl+P to Ctrl+Shift+P")
+
+
 def _migrate_config_from_file(config_from_yaml: dict) -> None:
+    _migrate_command_palette_shortcut(config_from_yaml)
     migrate_shape_color(config=config_from_yaml)
     keep_prev_brightness: bool = config_from_yaml.pop("keep_prev_brightness", False)
     keep_prev_contrast: bool = config_from_yaml.pop("keep_prev_contrast", False)
@@ -243,6 +267,7 @@ def load_config(config_file: Path | None, config_overrides: dict) -> dict:
             _update_dict(config, config_from_yaml, validate_item=_validate_config_item)
 
     config_overrides = copy.deepcopy(config_overrides)
+    _migrate_command_palette_shortcut(config_overrides)
     migrate_shape_color(config=config_overrides)
     _ignore_unavailable_point_colors(config_overrides, config["shape"])
     if "shape_color" in config_overrides:

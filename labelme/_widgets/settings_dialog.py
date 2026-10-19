@@ -246,6 +246,11 @@ class SettingsDialog(QtWidgets.QDialog):
         with QtCore.QSignalBlocker(editor):
             self._set_editor_value(editor=editor, value=value)
 
+    def focus_setting(self, key_path: tuple[str, ...]) -> None:
+        editor = self._editors[key_path]
+        self._page._scroll_area.ensureWidgetVisible(editor, 0, 48)
+        editor.setFocus(QtCore.Qt.FocusReason.ShortcutFocusReason)
+
     def set_choice_enabled(
         self,
         key_path: tuple[str, ...],

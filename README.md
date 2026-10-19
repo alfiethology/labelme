@@ -238,6 +238,14 @@ Everything else, including the Python import surface, is internal and may change
 Run `labelme --help` for detail.\
 The annotations are saved as a [JSON](http://www.json.org/) file.
 
+Press **Ctrl+P** (or select **Edit > Command Palette…**) to search commands,
+tools, and settings by name. Matching is case-insensitive and also searches menu
+locations. Use **↑/↓** to select a result, **Enter** or a click to run it, and
+**Esc** to close. Checkboxes toggle directly; other settings open at their control
+in Settings. Unavailable commands are shown disabled, just as in the menus.
+**Keep Previous Annotation** now uses **Ctrl+Shift+P**;
+the old Ctrl+P binding in existing config files is migrated automatically.
+
 The first time you save new annotations in a session, choose **Save jsons to
 image path** to save each JSON beside its image using the same filename stem,
 or **Choose json path manually** to use the file chooser for each new annotation

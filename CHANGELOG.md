@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a Ctrl+P command palette for searching menu commands, tools, and settings, with keyboard navigation, shortcut hints, current toggle states, and direct access to setting controls.
 - Added a first-save choice for each session: save new JSON annotations beside their images without a file chooser, or continue choosing JSON paths manually. Save As and explicitly configured output directories retain their existing behaviour.
 - Added View > Black Canvas Background and a matching Settings checkbox to switch the image surround between white and black, with the choice remembered between restarts.
 - Added inner point and outer ring colour pickers to Change Class Color, with both choices saved per class and restored after restarting Labelme.
@@ -22,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Moved Keep Previous Annotation from Ctrl+P to Ctrl+Shift+P to make room for the command palette; existing Ctrl+P bindings for that command are migrated automatically.
 - Enabled brightness/contrast carry-over by default: images without their own adjustments use the most recently changed values, while returning to an adjusted image restores that image's settings.
 - Reduced yellow drawing crosshairs from two pixels to one pixel thick.
 - Replaced the system drawing cursor with a 23-by-23-pixel cross with one-pixel black strokes and a white outline, using the same antialiasing as the canvas so its visible centre matches the click hotspot on both axes.
