@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed saved point-colour settings from another fork branch causing the entire configuration to be rejected and menu preferences to stop saving; unavailable colour settings are ignored in memory and preserved in the config file.
 - Fixed Snap to Existing Points, Lock Cursor to Pixels, Fill Editing Shapes, Show Center Dots, and Zoom Speed resetting after restarting Labelme; changes now save immediately and remain synchronized with Settings.
 - Fixed points and rectangle edges appearing half a pixel above and to the left of the drawing cursor by matching cursor and canvas stroke rasterization.
 - Fixed crosshair alignment with placed points and lines at fractional zoom levels and centered image offsets, and drawing endpoints using a stale mouse-move position instead of the click position.

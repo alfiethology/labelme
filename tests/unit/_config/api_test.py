@@ -26,6 +26,47 @@ def test_default_point_tool_shortcut_is_p() -> None:
     assert config["shortcuts"]["create_point"] == "P"
 
 
+def test_point_colours_from_another_branch_do_not_discard_settings(
+    tmp_path: Path,
+) -> None:
+    config_file = tmp_path / "labelmerc.yaml"
+    original = (
+        "auto_save: false\n"
+        "shape:\n"
+        "  vertex_outline_color: [10, 20, 30, 255]\n"
+        "  point_colors_by_label:\n"
+        "    hen_point:\n"
+        "      inner: [230, 97, 0]\n"
+        "      outer: [249, 240, 107]\n"
+        "canvas:\n"
+        "  snap_to_existing_points: true\n"
+        "  lock_cursor_to_pixels: true\n"
+    )
+    config_file.write_text(original)
+    config = _config.load_config(config_file=config_file, config_overrides={})
+    assert config["auto_save"] is False
+    assert config["canvas"]["snap_to_existing_points"] is True
+    assert config["canvas"]["lock_cursor_to_pixels"] is True
+    assert config_file.read_text() == original
+
+
+def test_inline_point_colour_settings_are_not_modified() -> None:
+    overrides = {
+        "shape": {
+            "point_colors_by_label": {
+                "hen_point": {
+                    "inner": [230, 97, 0],
+                    "outer": [249, 240, 107],
+                }
+            }
+        },
+        "canvas": {"snap_to_existing_points": True},
+    }
+    config = _config.load_config(config_file=None, config_overrides=overrides)
+    assert config["canvas"]["snap_to_existing_points"] is True
+    assert "point_colors_by_label" in overrides["shape"]
+
+
 @pytest.mark.parametrize("value", [0, 5, True, 2.5, "2", None])
 def test_invalid_zoom_speed_is_rejected(value: object) -> None:
     with pytest.raises(

@@ -211,6 +211,19 @@ def get_user_config_file(create_if_missing: bool = True) -> str:
     return str(user_config_path)
 
 
+def _ignore_unavailable_point_colors(config: dict, default_shape: dict) -> None:
+    # Fork branches with two-colour points share the same user Config File.
+    # Accept those settings when switching back to a branch without the feature,
+    # but leave the file untouched so the colour choices survive switching back.
+    shape = config.get("shape")
+    if not isinstance(shape, dict):
+        return
+    for key in ("point_colors_by_label", "vertex_outline_color"):
+        if key in shape and key not in default_shape:
+            shape.pop(key)
+            logger.info("Ignoring unavailable setting shape.{} in this branch", key)
+
+
 def load_config(config_file: Path | None, config_overrides: dict) -> dict:
     config: dict
     with open(here / "default_config.yaml", encoding="utf-8") as f:
@@ -221,12 +234,14 @@ def load_config(config_file: Path | None, config_overrides: dict) -> dict:
             config_from_yaml = _yaml.safe_load(f)
         if isinstance(config_from_yaml, dict):
             _migrate_config_from_file(config_from_yaml=config_from_yaml)
+            _ignore_unavailable_point_colors(config_from_yaml, config["shape"])
             if "shape_color" in config_from_yaml:
                 validate_shape_color(config=config_from_yaml["shape_color"])
             _update_dict(config, config_from_yaml, validate_item=_validate_config_item)
 
     config_overrides = copy.deepcopy(config_overrides)
     migrate_shape_color(config=config_overrides)
+    _ignore_unavailable_point_colors(config_overrides, config["shape"])
     if "shape_color" in config_overrides:
         validate_shape_color(config=config_overrides["shape_color"])
     _update_dict(config, config_overrides, validate_item=_validate_config_item)
