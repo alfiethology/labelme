@@ -227,7 +227,8 @@ class MainWindow(QtWidgets.QMainWindow):
     _image_path: str | None
     _prev_image_path: str | None
     _zoom_values: dict[str, tuple[_ZoomMode, float]]
-    _brightness_contrast_values: dict[str, tuple[int | None, int | None]]
+    _brightness_contrast_values: dict[str, tuple[int, int]]
+    _last_brightness_contrast_values: tuple[int, int] | None
     _scroll_values: dict[Qt.Orientation, dict[str, float]]
     _default_state: QtCore.QByteArray
     _recent_skeleton_template_paths: list[str]
@@ -2709,6 +2710,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._prev_image_path = None
         self._zoom_values = {}
         self._brightness_contrast_values = {}
+        self._last_brightness_contrast_values = None
         self._scroll_values = {
             Qt.Orientation.Horizontal: {},
             Qt.Orientation.Vertical: {},
@@ -3956,18 +3958,13 @@ class MainWindow(QtWidgets.QMainWindow):
             logger.warning("image_path is None, cannot set brightness/contrast")
             return
 
-        brightness: int | None
-        contrast: int | None
-        brightness, contrast = self._brightness_contrast_values.get(
-            self._image_path, (None, None)
-        )
-        if is_initial_load:
-            if self._config["keep_prev_brightness_contrast"] and self._prev_image_path:
-                brightness, contrast = self._brightness_contrast_values.get(
-                    self._prev_image_path, (None, None)
-                )
-            if brightness is None and contrast is None:
-                return
+        image_path = self._image_path
+        values = self._brightness_contrast_values.get(image_path)
+        if values is None and self._config["keep_prev_brightness_contrast"]:
+            values = self._last_brightness_contrast_values
+        if is_initial_load and values is None:
+            return
+        brightness, contrast = values if values is not None else (None, None)
 
         logger.debug(
             "Opening brightness/contrast dialog with brightness={}, contrast={}",
@@ -3986,20 +3983,23 @@ class MainWindow(QtWidgets.QMainWindow):
         if contrast is not None:
             dialog.slider_contrast.setValue(contrast)
 
+        def remember_adjustment() -> None:
+            values = (
+                dialog.slider_brightness.value(),
+                dialog.slider_contrast.value(),
+            )
+            self._brightness_contrast_values[image_path] = values
+            self._last_brightness_contrast_values = values
+
+        # Initialising a dialog or restoring an image must not replace the most
+        # recent user adjustment or give an untouched image its own settings.
+        dialog.slider_brightness.valueChanged.connect(remember_adjustment)
+        dialog.slider_contrast.valueChanged.connect(remember_adjustment)
         if is_initial_load:
             dialog.apply()
         else:
             dialog.exec()
-            brightness = dialog.slider_brightness.value()
-            contrast = dialog.slider_contrast.value()
-
-        self._brightness_contrast_values[self._image_path] = (brightness, contrast)
-        logger.debug(
-            "Updated states for {}: brightness={}, contrast={}",
-            self._image_path,
-            brightness,
-            contrast,
-        )
+        dialog.deleteLater()
 
     def toggle_shape_visibility(self, value: bool | None) -> None:
         for item in self._docks.label_list:

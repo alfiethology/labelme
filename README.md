@@ -262,6 +262,13 @@ Enable **View > Black Canvas Background** to use a black surround behind the
 image. Uncheck it to return to white. The same option is available in
 **Settings > Drawing and canvas**, and your choice is remembered after restarting.
 
+Brightness and contrast start at **1.00**. After you adjust an image, images
+without their own adjustments use that most recently changed pair. Returning to
+an image you adjusted restores its own settings without changing the defaults
+for untouched images. This is enabled by **View > Keep Previous
+Brightness/Contrast** and can be turned off there or in Settings. These image
+adjustments are remembered for the current Labelme session.
+
 In **Settings > Drawing and canvas**, choose **Point inner colour** and
 **Point outer ring colour** independently. The defaults are yellow and black.
 These colours apply immediately to standalone points, shape vertices, and

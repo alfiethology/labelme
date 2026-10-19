@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Enabled brightness/contrast carry-over by default: images without their own adjustments use the most recently changed values, while returning to an adjusted image restores that image's settings.
 - Reduced yellow drawing crosshairs from two pixels to one pixel thick.
 - Replaced the system drawing cursor with a 23-by-23-pixel cross with one-pixel black strokes and a white outline, using the same antialiasing as the canvas so its visible centre matches the click hotspot on both axes.
 - Changed regular bounding box drawing to use yellow, two-pixel dotted crosshairs, matching Bounding Box Quick Edit.

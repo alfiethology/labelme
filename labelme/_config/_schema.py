@@ -128,6 +128,14 @@ SETTINGS: Final[tuple[Setting, ...]] = (
             QT_TRANSLATE_NOOP("SettingsDialog", "Keep previous brightness/contrast"),
         ),
         kind="bool",
+        note=cast(
+            str,
+            QT_TRANSLATE_NOOP(
+                "SettingsDialog",
+                "Use the most recently adjusted settings for images without "
+                "their own brightness/contrast adjustments.",
+            ),
+        ),
     ),
     Setting(
         key_path=("canvas", "black_background"),
