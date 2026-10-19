@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import dataclasses
+from typing import Literal
+
 import numpy as np
 import pytest
 from PySide6 import QtGui
@@ -8,11 +11,89 @@ from labelme._shape import Shape
 from labelme._shape import ShapeType
 from labelme._widgets._shape_render import Palette
 from labelme._widgets._shape_render import ShapeRenderContext
+from labelme._widgets._shape_render import VertexHighlight
 from labelme._widgets._shape_render import bounds
 from labelme._widgets._shape_render import is_hit_by_point
 from labelme._widgets._shape_render import render_shape
 
 _SIZE = 200
+
+
+@pytest.mark.parametrize(
+    ("shape_type", "points"),
+    [
+        ("point", [[50, 50]]),
+        ("points", [[50, 50]]),
+        ("polygon", [[50, 50], [150, 50], [150, 150]]),
+        ("rectangle", [[50, 50], [150, 150]]),
+        ("oriented_rectangle", [[50, 50], [150, 50], [150, 150], [50, 150]]),
+        ("circle", [[50, 50], [150, 50]]),
+        ("line", [[50, 50], [150, 150]]),
+        ("linestrip", [[50, 50], [150, 50], [150, 150]]),
+        ("skeleton", [[20, 20], [150, 20], [150, 150], [20, 150], [50, 50]]),
+    ],
+)
+@pytest.mark.parametrize("scale", [0.5, 1.0, 2.0])
+@pytest.mark.parametrize("selected", [False, True])
+def test_points_have_independent_inner_and_ring_colours(
+    qapp: QtGui.QGuiApplication,
+    shape_type: ShapeType,
+    points: list[list[float]],
+    scale: float,
+    selected: bool,
+) -> None:
+    shape = _shape(shape_type, points)
+    inner = QtGui.QColor(0, 255, 0)
+    outer = QtGui.QColor(255, 0, 255)
+    palette = dataclasses.replace(
+        Palette.from_rgb(rgb=(255, 0, 0)),
+        vertex_fill=inner,
+        vertex_outline=outer,
+    )
+    context = ShapeRenderContext(
+        scale=scale,
+        palette=palette,
+        point_size=8,
+        point_type="round",
+        selected=selected,
+        fill=True,
+        highlight=None,
+        rotation_highlight=None,
+    )
+    image = QtGui.QImage(_SIZE, _SIZE, QtGui.QImage.Format.Format_ARGB32)
+    # Include regions matching either point colour in the background.
+    image.fill(inner if selected else outer)
+    painter = QtGui.QPainter(image)
+    render_shape(painter, shape, context)
+    painter.end()
+    center = int(50 * scale)
+    assert image.pixelColor(center, center) == inner
+    assert image.pixelColor(center + 4, center) == outer
+
+
+@pytest.mark.parametrize("mode", ["move", "near"])
+def test_highlighted_point_keeps_outer_ring(mode: Literal["move", "near"]) -> None:
+    shape = _shape("point", [[50, 50]])
+    highlight = VertexHighlight(index=0, mode=mode)
+    palette = Palette.from_rgb(rgb=(255, 0, 0))
+    context = ShapeRenderContext(
+        scale=1.0,
+        palette=palette,
+        point_size=8,
+        point_type="round",
+        selected=True,
+        fill=False,
+        highlight=highlight,
+        rotation_highlight=None,
+    )
+    image = QtGui.QImage(_SIZE, _SIZE, QtGui.QImage.Format.Format_ARGB32)
+    image.fill(QtGui.QColor(128, 128, 128))
+    painter = QtGui.QPainter(image)
+    render_shape(painter, shape, context)
+    painter.end()
+    assert image.pixelColor(50, 50) == palette.hvertex_fill
+    radius = int(context.point_size * highlight.size_factor / 2)
+    assert image.pixelColor(50 + radius, 50) == palette.vertex_outline
 
 
 def _polygon(label: str | None) -> Shape:

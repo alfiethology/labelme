@@ -7,6 +7,7 @@ from PySide6 import QtGui
 from PySide6 import QtWidgets
 from pytestqt.qtbot import QtBot
 
+from labelme._widgets.settings_dialog import _ColorButton
 from labelme._yaml import safe_load
 
 from ..conftest import close_or_pause
@@ -25,6 +26,10 @@ def test_view_menu_changes_and_persists_default_label_color(
     config_file.write_text("", encoding="utf-8")
     win = main_win(config_file=config_file)
     canvas = win._canvas_widgets.canvas
+    win._open_settings()
+    assert win._settings_dialog is not None
+    point_colour = win._settings_dialog._editors[("shape", "vertex_fill_color")]
+    assert isinstance(point_colour, _ColorButton)
 
     action = next(
         action
@@ -49,6 +54,7 @@ def test_view_menu_changes_and_persists_default_label_color(
 
     assert canvas._draft_palette.line.getRgb() == (12, 34, 56, 128)
     assert canvas._draft_palette.vertex_fill.getRgb() == (12, 34, 56, 255)
+    assert point_colour.color == canvas._draft_palette.vertex_fill
     assert canvas._draft_palette.select_line.getRgb() == (12, 34, 56, 255)
     assert canvas._draft_palette.select_fill.getRgb() == (12, 34, 56, 64)
     assert win._get_rgb_by_label(

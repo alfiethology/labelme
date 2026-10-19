@@ -15,6 +15,15 @@ from .._utils.qt import new_icon
 ApplySetting = Callable[[tuple[str, ...], object], bool]
 
 
+class _ColorButton(QtWidgets.QPushButton):
+    def set_color(self, color: QtGui.QColor) -> None:
+        self.color = color
+        self.setText(color.name().upper())
+        swatch = QtGui.QPixmap(20, 20)
+        swatch.fill(color)
+        self.setIcon(QtGui.QIcon(swatch))
+
+
 class _PlainTextEdit(QtWidgets.QPlainTextEdit):
     editing_finished = QtCore.Signal()
 
@@ -333,6 +342,11 @@ class SettingsDialog(QtWidgets.QDialog):
 
     def _create_editor(self, setting: schema.Setting) -> QtWidgets.QWidget:
         value = self._read_value(setting.key_path)
+        if setting.kind == "color":
+            button = _ColorButton()
+            self._set_editor_value(editor=button, value=value)
+            button.clicked.connect(lambda: self._choose_color(setting, button))
+            return button
         if setting.kind == "bool":
             check = QtWidgets.QCheckBox()
             self._set_editor_value(editor=check, value=value)
@@ -385,6 +399,20 @@ class SettingsDialog(QtWidgets.QDialog):
             return edit
         typing.assert_never(setting.kind)
 
+    def _choose_color(self, setting: schema.Setting, button: _ColorButton) -> None:
+        color = QtWidgets.QColorDialog.getColor(
+            button.color, self, self.tr(setting.label)
+        )
+        if not color.isValid():
+            return
+        # Keep any opacity configured in YAML; these controls choose RGB only.
+        color.setAlpha(button.color.alpha())
+        value = [color.red(), color.green(), color.blue(), color.alpha()]
+        if value == self._read_value(setting.key_path):
+            return
+        button.set_color(color)
+        self._apply(setting.key_path, value)
+
     def _create_combo(
         self,
         setting: schema.Setting,
@@ -403,7 +431,10 @@ class SettingsDialog(QtWidgets.QDialog):
         return combo
 
     def _set_editor_value(self, editor: QtWidgets.QWidget, value: object) -> None:
-        if isinstance(editor, QtWidgets.QCheckBox):
+        if isinstance(editor, _ColorButton):
+            assert isinstance(value, list)
+            editor.set_color(QtGui.QColor(*value))
+        elif isinstance(editor, QtWidgets.QCheckBox):
             editor.setChecked(bool(value))
         elif isinstance(editor, QtWidgets.QComboBox):
             editor.setCurrentIndex(max(editor.findData(value), 0))

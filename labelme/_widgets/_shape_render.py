@@ -57,6 +57,9 @@ class Palette:
     select_fill: QtGui.QColor
     vertex_fill: QtGui.QColor
     hvertex_fill: QtGui.QColor
+    vertex_outline: QtGui.QColor = dataclasses.field(
+        default_factory=lambda: QtGui.QColor(0, 0, 0)
+    )
 
     @classmethod
     def from_rgb(cls, rgb: tuple[int, int, int]) -> Palette:
@@ -250,18 +253,6 @@ def _paint_shape_points(
     paths = _build_shape_points_paths(shape=shape, context=context)
 
     painter.drawPath(paths.line)
-    _paint_filled_vertices(
-        painter=painter,
-        path=paths.vertices,
-        highlighted=context.highlight is not None,
-        palette=palette,
-    )
-    _paint_filled_vertices(
-        painter=painter,
-        path=paths.rotation_vertices,
-        highlighted=context.rotation_highlight is not None,
-        palette=palette,
-    )
     if context.fill and shape.shape_type not in [
         "line",
         "linestrip",
@@ -277,13 +268,26 @@ def _paint_shape_points(
         painter.setPen(arrow_pen)
         painter.drawPath(paths.orientation_arrow)
 
-    if paths.negative_vertices.length() > 0:
-        neg_color = QtGui.QColor(255, 0, 0, 255)
-        neg_pen = QtGui.QPen(neg_color)
-        neg_pen.setWidth(PEN_WIDTH)
-        painter.setPen(neg_pen)
-        painter.drawPath(paths.negative_vertices)
-        painter.fillPath(paths.negative_vertices, neg_color)
+    # Paint handles last so the shape's fill cannot tint their two colours.
+    _paint_filled_vertices(
+        painter=painter,
+        path=paths.vertices,
+        highlighted=context.highlight is not None,
+        palette=palette,
+    )
+    _paint_filled_vertices(
+        painter=painter,
+        path=paths.rotation_vertices,
+        highlighted=context.rotation_highlight is not None,
+        palette=palette,
+    )
+    _paint_filled_vertices(
+        painter=painter,
+        path=paths.negative_vertices,
+        highlighted=False,
+        palette=palette,
+        fill=QtGui.QColor(255, 0, 0),
+    )
 
     if paths.missing_vertices.length() > 0:
         missing_pen = QtGui.QPen(QtGui.QColor(128, 128, 128, 220))
@@ -298,12 +302,22 @@ def _paint_filled_vertices(
     path: QtGui.QPainterPath,
     highlighted: bool,
     palette: Palette,
+    fill: QtGui.QColor | None = None,
 ) -> None:
     if path.length() == 0:
         return
-    fill = palette.hvertex_fill if highlighted else palette.vertex_fill
-    painter.drawPath(path)
-    painter.fillPath(path, fill)
+    if fill is None:
+        fill = palette.hvertex_fill if highlighted else palette.vertex_fill
+    painter.save()
+    try:
+        pen = QtGui.QPen(palette.vertex_outline)
+        pen.setWidth(PEN_WIDTH)
+        pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.setBrush(fill)
+        painter.drawPath(path)
+    finally:
+        painter.restore()
 
 
 def _resolve_vertex_style(

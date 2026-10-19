@@ -388,19 +388,26 @@ class Canvas(QtWidgets.QWidget):
 
     def _resolve_palette(self, label: str | None) -> Palette:
         if label is None or self._color_resolver is None:
-            return _DEFAULT_PALETTE
+            return self._draft_palette
         # Auto colors depend on the live label ordering, so the palette cannot
         # be cached on the shape. Memoize within a single paint pass instead:
         # many shapes share a few labels, so this collapses the per-shape
         # resolution into one lookup per distinct label per frame.
         palette = self._palette_cache.get(label)
         if palette is None:
-            palette = Palette.from_rgb(rgb=self._color_resolver(label))
+            palette = dataclasses.replace(
+                Palette.from_rgb(rgb=self._color_resolver(label)),
+                vertex_fill=self._draft_palette.vertex_fill,
+                hvertex_fill=self._draft_palette.hvertex_fill,
+                vertex_outline=self._draft_palette.vertex_outline,
+            )
             self._palette_cache[label] = palette
         return palette
 
     def set_draft_palette(self, palette: Palette) -> None:
         self._draft_palette = palette
+        self._palette_cache.clear()
+        self.update()
 
     def _highlight_vertex(self, index: int, mode: Literal["move", "near"]) -> None:
         self._highlight = VertexHighlight(index=index, mode=mode)
@@ -2296,6 +2303,9 @@ class Canvas(QtWidgets.QWidget):
                 radius = self._skeleton_node_size / 2
                 if selected:
                     radius *= 1.4
+                vertex_pen = QtGui.QPen(self._draft_palette.vertex_outline)
+                vertex_pen.setWidth(2)
+                painter.setPen(vertex_pen)
                 painter.setBrush(
                     self._draft_palette.hvertex_fill
                     if selected

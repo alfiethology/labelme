@@ -4,12 +4,15 @@ import os
 from pathlib import Path
 
 import pytest
+from PySide6 import QtGui
 from PySide6 import QtWidgets
 from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
 from labelme._app import MainWindow
+from labelme._shape import Shape
 from labelme._widgets import SettingsDialog
+from labelme._widgets.settings_dialog import _ColorButton
 from labelme._widgets.settings_dialog import _PlainTextEdit
 from labelme._yaml import safe_load
 
@@ -44,6 +47,56 @@ def editable_config_file(tmp_path: Path) -> Path:
     config_file = tmp_path / "labelmerc.yaml"
     config_file.write_text("auto_save: true\n")
     return config_file
+
+
+@pytest.mark.gui
+def test_point_colours_apply_to_drafts_and_existing_shapes_and_persist(
+    main_win: MainWinFactory,
+    editable_config_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    win = main_win(config_file=editable_config_file)
+    dialog = _open_settings_dialog(win)
+    canvas = win._canvas_widgets.canvas
+    shape = Shape(label="bird", shape_type="point")
+    canvas._resolve_palette(shape.label)  # Prime the cache before changing colours.
+    for key, rgb in (
+        ("vertex_fill_color", (12, 34, 56)),
+        ("vertex_outline_color", (210, 220, 230)),
+    ):
+        monkeypatch.setattr(
+            QtWidgets.QColorDialog,
+            "getColor",
+            lambda *args, rgb=rgb: QtGui.QColor(*rgb),
+        )
+        button = dialog._editors[("shape", key)]
+        assert isinstance(button, _ColorButton)
+        button.click()
+    palette = canvas._render_context(shape, highlighted=False).palette
+    assert palette.vertex_fill.getRgb() == (12, 34, 56, 255)
+    assert palette.vertex_outline.getRgb() == (210, 220, 230, 255)
+    assert canvas._draft_palette.vertex_fill == palette.vertex_fill
+    assert canvas._draft_palette.vertex_outline == palette.vertex_outline
+    saved = safe_load(editable_config_file.read_text())["shape"]
+    assert saved["vertex_fill_color"] == [12, 34, 56, 255]
+    assert saved["vertex_outline_color"] == [210, 220, 230, 255]
+    assert not win._is_changed
+
+    win.close()
+    assert not win.isVisible()
+    reopened = main_win(config_file=editable_config_file)
+    reopened_palette = reopened._canvas_widgets.canvas._resolve_palette("bird")
+    assert reopened_palette.vertex_fill == palette.vertex_fill
+    assert reopened_palette.vertex_outline == palette.vertex_outline
+    reopened_dialog = _open_settings_dialog(reopened)
+    for key, expected in (
+        ("vertex_fill_color", palette.vertex_fill),
+        ("vertex_outline_color", palette.vertex_outline),
+    ):
+        button = reopened_dialog._editors[("shape", key)]
+        assert isinstance(button, _ColorButton)
+        assert button.color == expected
+    assert safe_load(editable_config_file.read_text())["shape"] == saved
 
 
 @pytest.fixture

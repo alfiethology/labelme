@@ -19,7 +19,7 @@ Group = Literal[
     "Label behavior",
     "AI assist",
 ]
-Kind = Literal["bool", "enum", "str_list", "language"]
+Kind = Literal["bool", "enum", "str_list", "language", "color"]
 
 # Group names double as headings. QT_TRANSLATE_NOOP marks them for
 # pyside6-lupdate under the SettingsDialog context (where they are resolved via
@@ -197,6 +197,18 @@ SETTINGS: Final[tuple[Setting, ...]] = (
         ),
         kind="bool",
         beta=True,
+    ),
+    Setting(
+        key_path=("shape", "vertex_fill_color"),
+        group="Drawing and canvas",
+        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Point inner colour")),
+        kind="color",
+    ),
+    Setting(
+        key_path=("shape", "vertex_outline_color"),
+        group="Drawing and canvas",
+        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Point outer ring colour")),
+        kind="color",
     ),
     Setting(
         key_path=("labels",),

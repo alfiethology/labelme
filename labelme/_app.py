@@ -3307,6 +3307,7 @@ class MainWindow(QtWidgets.QMainWindow):
             select_fill=QtGui.QColor(*self._config["shape"]["select_fill_color"]),
             vertex_fill=QtGui.QColor(*self._config["shape"]["vertex_fill_color"]),
             hvertex_fill=QtGui.QColor(*self._config["shape"]["hvertex_fill_color"]),
+            vertex_outline=QtGui.QColor(*self._config["shape"]["vertex_outline_color"]),
         )
 
     def _change_default_label_color(self) -> None:
@@ -3359,6 +3360,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._config["shape"]["vertex_fill_color"] = vertex_fill_color
         self._config["shape"]["select_line_color"] = select_line_color
         self._config["shape"]["select_fill_color"] = select_fill_color
+        if self._settings_dialog is not None:
+            self._settings_dialog.set_value(
+                ("shape", "vertex_fill_color"), vertex_fill_color
+            )
         canvas = self._canvas_widgets.canvas
         canvas.set_draft_palette(self._draft_palette_from_config())
 
@@ -4528,6 +4533,13 @@ class MainWindow(QtWidgets.QMainWindow):
             canvas = self._canvas_widgets.canvas
             canvas.set_show_labels(self._config["shape"]["show_labels"])
             canvas.update()
+        elif key_path in (
+            ("shape", "vertex_fill_color"),
+            ("shape", "vertex_outline_color"),
+        ):
+            self._canvas_widgets.canvas.set_draft_palette(
+                self._draft_palette_from_config()
+            )
         elif key_path == ("canvas", "allow_out_of_bounds_points"):
             canvas = self._canvas_widgets.canvas
             canvas.set_allow_out_of_bounds_points(

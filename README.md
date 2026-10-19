@@ -258,6 +258,13 @@ including **Edit > Snap to Existing Points**, **Edit > Lock Cursor to Pixels**,
 **View > Show Center Dots**. You can also change these preferences in
 **Settings > Drawing and canvas**.
 
+In **Settings > Drawing and canvas**, choose **Point inner colour** and
+**Point outer ring colour** independently. The defaults are yellow and black.
+These colours apply immediately to standalone points, shape vertices, and
+skeleton nodes, including existing shapes, and are saved for future sessions.
+Hover highlights and red negative/occluded points retain their status colours
+inside the selected outer ring.
+
 ```bash
 labelme  # just open gui
 

@@ -18,6 +18,7 @@ from labelme._pose import SkeletonTemplate
 from labelme._pose import make_skeleton_shape
 from labelme._shape import Shape
 from labelme._shape import ShapeType
+from labelme._widgets._shape_render import Palette
 from labelme._widgets.canvas import Canvas
 from labelme._widgets.canvas import _compute_intersection_edges_image
 from labelme._widgets.canvas import _compute_overscroll_slack
@@ -44,6 +45,24 @@ def canvas(qtbot: QtBot) -> Canvas:
     canvas.pixmap = QtGui.QPixmap(_WIDTH, _HEIGHT)
     qtbot.addWidget(canvas)
     return canvas
+
+
+def test_point_colours_are_independent_of_class_colours(canvas: Canvas) -> None:
+    canvas.set_color_resolver(
+        lambda label: (255, 0, 0) if label == "a" else (0, 0, 255)
+    )
+    canvas._resolve_palette("a")  # Cache a palette before applying the new colours.
+    point_palette = dataclasses.replace(
+        Palette.from_rgb(rgb=(0, 255, 0)), vertex_outline=QtGui.QColor(255, 0, 255)
+    )
+    canvas.set_draft_palette(point_palette)
+    first = canvas._resolve_palette("a")
+    second = canvas._resolve_palette("b")
+    assert first.line == QtGui.QColor(255, 0, 0)
+    assert second.line == QtGui.QColor(0, 0, 255)
+    for palette in (first, second):
+        assert palette.vertex_fill == point_palette.vertex_fill
+        assert palette.vertex_outline == point_palette.vertex_outline
 
 
 @pytest.mark.gui

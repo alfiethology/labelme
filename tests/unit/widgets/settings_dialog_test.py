@@ -12,6 +12,7 @@ from pytestqt.qtbot import QtBot
 from labelme._config import _schema as schema
 from labelme._config import load_config
 from labelme._widgets.settings_dialog import SettingsDialog
+from labelme._widgets.settings_dialog import _ColorButton
 from labelme._widgets.settings_dialog import _PlainTextEdit
 
 Applied = list[tuple[tuple[str, ...], object]]
@@ -47,6 +48,41 @@ def dialog(qtbot: QtBot, applied: Applied) -> SettingsDialog:
 
 def test_no_apply_on_construction(dialog: SettingsDialog, applied: Applied) -> None:
     assert applied == []
+
+
+@pytest.mark.parametrize("key", ["vertex_fill_color", "vertex_outline_color"])
+@pytest.mark.parametrize("succeed", [True, False])
+def test_point_colour_picker_applies_or_reverts(
+    qtbot: QtBot,
+    applied: Applied,
+    monkeypatch: pytest.MonkeyPatch,
+    key: str,
+    succeed: bool,
+) -> None:
+    original = [21, 32, 43, 128]
+    dialog = _make_dialog(qtbot, applied, {"shape": {key: original}}, succeed=succeed)
+    button = dialog._editors[("shape", key)]
+    assert isinstance(button, _ColorButton)
+    monkeypatch.setattr(
+        QtWidgets.QColorDialog, "getColor", lambda *args: QtGui.QColor(54, 65, 76)
+    )
+    button.click()
+    assert applied == [(("shape", key), [54, 65, 76, 128])]
+    assert button.color.getRgb() == tuple([54, 65, 76, 128] if succeed else original)
+
+
+def test_cancelled_colour_picker_does_not_apply(
+    dialog: SettingsDialog, applied: Applied, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    button = dialog._editors[("shape", "vertex_outline_color")]
+    assert isinstance(button, _ColorButton)
+    original = button.color
+    monkeypatch.setattr(
+        QtWidgets.QColorDialog, "getColor", lambda *args: QtGui.QColor()
+    )
+    button.click()
+    assert applied == []
+    assert button.color == original
 
 
 def test_editors_have_accessible_names(dialog: SettingsDialog) -> None:
