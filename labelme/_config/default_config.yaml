@@ -70,6 +70,7 @@ fit_to_content:
 # canvas
 epsilon: 10.0
 canvas:
+  black_background: false
   fill_drawing: true
   fill_editing: true
   show_center_dots: false

@@ -421,6 +421,7 @@ def test_keep_prev_dialog_toggle_checks_menu_action(
             ("keep_prev_brightness_contrast",),
         ),
         ("fill_drawing", ("canvas", "fill_drawing")),
+        ("black_background", ("canvas", "black_background")),
         ("fill_editing", ("canvas", "fill_editing")),
         ("show_center_dots", ("canvas", "show_center_dots")),
         ("snap_to_existing_points", ("canvas", "snap_to_existing_points")),
@@ -472,6 +473,7 @@ def test_menu_toggle_persists_and_syncs_settings_dialog(
 @pytest.mark.parametrize(
     "key",
     [
+        "black_background",
         "fill_editing",
         "show_center_dots",
         "snap_to_existing_points",
@@ -554,6 +556,7 @@ def test_new_menu_preferences_revert_if_saving_fails(
         QtWidgets.QMessageBox, "warning", lambda *args: warnings.append(args[2])
     )
     for key in (
+        "black_background",
         "fill_editing",
         "show_center_dots",
         "snap_to_existing_points",
@@ -572,7 +575,7 @@ def test_new_menu_preferences_revert_if_saving_fails(
     assert win._zoom_speed == 2
     assert actions[2].isChecked()
     assert not actions[4].isChecked()
-    assert len(warnings) == 5
+    assert len(warnings) == 6
     assert editable_config_file.read_text() == original_file
 
 

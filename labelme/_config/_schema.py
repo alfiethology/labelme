@@ -130,6 +130,12 @@ SETTINGS: Final[tuple[Setting, ...]] = (
         kind="bool",
     ),
     Setting(
+        key_path=("canvas", "black_background"),
+        group="Drawing and canvas",
+        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Black canvas background")),
+        kind="bool",
+    ),
+    Setting(
         key_path=("canvas", "fill_drawing"),
         group="Drawing and canvas",
         label=cast(

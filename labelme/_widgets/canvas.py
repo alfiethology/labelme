@@ -324,6 +324,22 @@ class Canvas(QtWidgets.QWidget):
         self.context_menu_origin: QtCore.QPoint | None = None
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.WheelFocus)
+        self.set_black_background(False)
+
+    def set_black_background(self, value: bool) -> None:
+        self._black_background = value
+        palette = self.palette()
+        palette.setColor(
+            QtGui.QPalette.ColorRole.Window,
+            QtGui.QColor("black" if value else "white"),
+        )
+        palette.setColor(
+            QtGui.QPalette.ColorRole.WindowText,
+            QtGui.QColor("white" if value else "black"),
+        )
+        self.setPalette(palette)
+        self.setAutoFillBackground(True)
+        self.update()
 
     def set_fill_drawing(self, value: bool) -> None:
         self._fill_drawing = value

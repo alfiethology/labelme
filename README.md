@@ -258,6 +258,10 @@ including **Edit > Snap to Existing Points**, **Edit > Lock Cursor to Pixels**,
 **View > Show Center Dots**. You can also change these preferences in
 **Settings > Drawing and canvas**.
 
+Enable **View > Black Canvas Background** to use a black surround behind the
+image. Uncheck it to return to white. The same option is available in
+**Settings > Drawing and canvas**, and your choice is remembered after restarting.
+
 In **Settings > Drawing and canvas**, choose **Point inner colour** and
 **Point outer ring colour** independently. The defaults are yellow and black.
 These colours apply immediately to standalone points, shape vertices, and

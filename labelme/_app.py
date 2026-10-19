@@ -170,6 +170,7 @@ class _Actions(NamedTuple):
     zoom_org: QtGui.QAction
     zoom_speed_menu: QtWidgets.QMenu
     reset_layout: QtGui.QAction
+    black_background: QtGui.QAction
     fill_drawing: QtGui.QAction
     fill_editing: QtGui.QAction
     snap_to_existing_points: QtGui.QAction
@@ -282,6 +283,7 @@ class MainWindow(QtWidgets.QMainWindow):
             (
                 "keep_prev_brightness_contrast",
             ): self._actions.toggle_keep_prev_brightness_contrast,
+            ("canvas", "black_background"): self._actions.black_background,
             ("canvas", "fill_drawing"): self._actions.fill_drawing,
             ("canvas", "fill_editing"): self._actions.fill_editing,
             ("canvas", "show_center_dots"): self._actions.show_center_dots,
@@ -738,6 +740,12 @@ class MainWindow(QtWidgets.QMainWindow):
             slot=self._reset_layout,
             icon="phosphor/layout-duotone.svg",
         )
+        black_background = action(
+            text=self.tr("Black Canvas Background"),
+            tip=self.tr("Use a black background around the image instead of white"),
+            checkable=True,
+            checked=self._config["canvas"]["black_background"],
+        )
         fill_drawing = action(
             text=self.tr("Fill Drawing Polygon"),
             icon="phosphor/paint-bucket.svg",
@@ -937,6 +945,7 @@ class MainWindow(QtWidgets.QMainWindow):
             zoom_org=zoom_org,
             zoom_speed_menu=zoom_speed_menu,
             reset_layout=reset_layout,
+            black_background=black_background,
             fill_drawing=fill_drawing,
             fill_editing=fill_editing,
             snap_to_existing_points=snap_to_existing_points,
@@ -1144,6 +1153,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._docks.file_dock.toggleViewAction(),
                 None,
                 self._actions.reset_layout,
+                self._actions.black_background,
                 None,
                 self._actions.fill_drawing,
                 self._actions.fill_editing,
@@ -4527,6 +4537,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 action.setChecked(value)
             canvas = self._canvas_widgets.canvas
             canvas_setters: dict[tuple[str, ...], typing.Callable[[bool], None]] = {
+                ("canvas", "black_background"): canvas.set_black_background,
                 ("canvas", "fill_drawing"): canvas.set_fill_drawing,
                 ("canvas", "fill_editing"): canvas.set_fill_editing,
                 ("canvas", "show_center_dots"): canvas.set_show_center_dots,

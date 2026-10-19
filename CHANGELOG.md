@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added View > Black Canvas Background and a matching Settings checkbox to switch the image surround between white and black, with the choice remembered between restarts.
 - Added inner point and outer ring colour pickers to Change Class Color, with both choices saved per class and restored after restarting Labelme.
 - Added independently selectable point inner and outer ring colours in Settings > Drawing and canvas, applied to shape vertices, standalone points, and skeleton nodes for visibility over varied backgrounds.
 - Added a checkable Edit > Lock Cursor to Pixels option to snap cursor placement and new manual annotations to whole image-pixel coordinates, with usage documented in the README.
