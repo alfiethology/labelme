@@ -221,6 +221,7 @@ class MainWindow(QtWidgets.QMainWindow):
     _ai_text: AiTextToAnnotationWidget
 
     _output_dir: Path | None
+    _json_save_mode: Literal["image_path", "manual"] | None
     _image: QtGui.QImage
     _annotation: Annotation | None
     _label_file_path: str | None
@@ -2702,6 +2703,7 @@ class MainWindow(QtWidgets.QMainWindow):
         output_dir: str | None,
     ) -> None:
         self._output_dir = Path(output_dir) if output_dir else None
+        self._json_save_mode = None
 
         self._image = QtGui.QImage()
         self._annotation = None
@@ -4333,7 +4335,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if not save_as and self._label_file_path is not None:
             label_path = self._label_file_path
         if label_path is None:
-            label_path = self.prompt_save_file_path()
+            label_path = (
+                self.prompt_save_file_path(save_as=True)
+                if save_as
+                else self.prompt_save_file_path()
+            )
 
         if not label_path:
             logger.warning("label_path={!r} is empty, so cannot save", label_path)
@@ -4342,8 +4348,55 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.save_labels(label_path=label_path):
             self.mark_clean()
 
-    def prompt_save_file_path(self) -> str:
+    def _prompt_json_save_mode(self) -> Literal["image_path", "manual"] | None:
+        dialog = QtWidgets.QMessageBox(self)
+        dialog.setWindowTitle(self.tr("Save JSON annotations"))
+        dialog.setText(
+            self.tr("Where should new JSON annotations be saved this session?")
+        )
+        image_path = dialog.addButton(
+            self.tr("Save jsons to image path"),
+            QtWidgets.QMessageBox.ButtonRole.AcceptRole,
+        )
+        manual = dialog.addButton(
+            self.tr("Choose json path manually"),
+            QtWidgets.QMessageBox.ButtonRole.ActionRole,
+        )
+        dialog.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        picked = dialog.clickedButton()
+        dialog.deleteLater()
+        if picked is image_path:
+            return "image_path"
+        if picked is manual:
+            return "manual"
+        return None
+
+    def prompt_save_file_path(self, *, save_as: bool = False) -> str:
         assert self._image_path is not None
+        # An explicitly selected output directory already supplies a destination.
+        # Save As always keeps the file chooser, regardless of the session choice.
+        if not save_as and self._output_dir is None:
+            if self._json_save_mode is None:
+                self._json_save_mode = self._prompt_json_save_mode()
+                if self._json_save_mode is None:
+                    return ""
+            if self._json_save_mode == "image_path":
+                label_path = _resolve_label_path(
+                    image_or_label_path=self._image_path, output_dir=None
+                )
+                if Path(label_path).exists():
+                    answer = QtWidgets.QMessageBox.question(
+                        self,
+                        self.tr("Confirm Save"),
+                        self.tr('"{}" already exists. Replace it?').format(label_path),
+                        QtWidgets.QMessageBox.StandardButton.Yes
+                        | QtWidgets.QMessageBox.StandardButton.No,
+                        QtWidgets.QMessageBox.StandardButton.No,
+                    )
+                    if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                        return ""
+                return label_path
         caption = self.tr("%s - Choose File") % __appname__
         filters = self.tr("Label files (*%s)") % LABEL_FILE_SUFFIX
         dlg = QtWidgets.QFileDialog(

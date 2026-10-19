@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added a first-save choice for each session: save new JSON annotations beside their images without a file chooser, or continue choosing JSON paths manually. Save As and explicitly configured output directories retain their existing behaviour.
 - Added View > Black Canvas Background and a matching Settings checkbox to switch the image surround between white and black, with the choice remembered between restarts.
 - Added inner point and outer ring colour pickers to Change Class Color, with both choices saved per class and restored after restarting Labelme.
 - Added independently selectable point inner and outer ring colours in Settings > Drawing and canvas, applied to shape vertices, standalone points, and skeleton nodes for visibility over varied backgrounds.

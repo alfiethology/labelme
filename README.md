@@ -238,6 +238,14 @@ Everything else, including the Python import surface, is internal and may change
 Run `labelme --help` for detail.\
 The annotations are saved as a [JSON](http://www.json.org/) file.
 
+The first time you save new annotations in a session, choose **Save jsons to
+image path** to save each JSON beside its image using the same filename stem,
+or **Choose json path manually** to use the file chooser for each new annotation
+file. This choice lasts until Labelme closes. Existing annotations save to their
+known JSON files; **Save As** still opens the file chooser. An output directory
+selected with **Change Output Dir** or `--output` takes precedence over this
+session choice.
+
 Enable **Edit > Lock Cursor to Pixels** near the bottom of the Edit menu to
 snap cursor placement to the nearest whole image-pixel coordinate, at any zoom
 level. New manually drawn points and shapes then save whole-pixel coordinates
