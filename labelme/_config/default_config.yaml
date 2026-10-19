@@ -70,6 +70,9 @@ canvas:
   fill_drawing: true
   fill_editing: true
   show_center_dots: false
+  snap_to_existing_points: false
+  lock_cursor_to_pixels: false
+  zoom_speed: 2
   # None: do nothing
   # close: close polygon
   double_click: close

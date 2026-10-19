@@ -78,6 +78,10 @@ def main_win(
 ) -> Generator[MainWinFactory, None, None]:
     created: list[MainWindow] = []
 
+    # Keep preferences across launches within a test, while sharing only caches
+    # across tests. Saved menu choices must not affect another test's defaults.
+    (session_home / ".labelmerc").unlink(missing_ok=True)
+
     # Preserve original excepthook so main()'s override is undone after test
     monkeypatch.setattr(sys, "excepthook", sys.excepthook)
 

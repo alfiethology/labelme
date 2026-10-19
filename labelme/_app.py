@@ -90,7 +90,6 @@ class _ZoomMode(enum.Enum):
     MANUAL_ZOOM = enum.auto()
 
 
-_DEFAULT_ZOOM_SPEED: Final[int] = 2
 _ZOOM_SPEEDS: Final[tuple[int, ...]] = (1, 2, 3, 4)
 _ZOOM_STEP_PER_SPEED: Final[float] = 0.1
 _WHEEL_DELTA_PER_STEP: Final[int] = 120
@@ -263,7 +262,7 @@ class MainWindow(QtWidgets.QMainWindow):
             tuple[str, dict[str, bool], int | None, str] | None
         ) = None
         self._runtime_label_colors: dict[str, tuple[int, int, int]] = {}
-        self._zoom_speed = _DEFAULT_ZOOM_SPEED
+        self._zoom_speed = self._config["canvas"]["zoom_speed"]
         self._change_label_choices: dict[str, str] | None = None
         self._bounding_box_quick_edit_active = False
         self._change_label_index = 0
@@ -284,6 +283,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 "keep_prev_brightness_contrast",
             ): self._actions.toggle_keep_prev_brightness_contrast,
             ("canvas", "fill_drawing"): self._actions.fill_drawing,
+            ("canvas", "fill_editing"): self._actions.fill_editing,
+            ("canvas", "show_center_dots"): self._actions.show_center_dots,
+            (
+                "canvas",
+                "snap_to_existing_points",
+            ): self._actions.snap_to_existing_points,
+            ("canvas", "lock_cursor_to_pixels"): self._actions.lock_cursor_to_pixels,
         }
         self._connect_persistent_actions()
         self._shape_clipboard.availability_changed.connect(
@@ -725,6 +731,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 checked=speed == self._zoom_speed,
             )
             zoom_speed_group.addAction(speed_action)
+            speed_action.setData(speed)
             zoom_speed_menu.addAction(speed_action)
         reset_layout = action(
             text=self.tr("Reset Layout"),
@@ -739,48 +746,35 @@ class MainWindow(QtWidgets.QMainWindow):
             enabled=True,
             checked=self._config["canvas"]["fill_drawing"],
         )
-        self._canvas_widgets.canvas.set_fill_drawing(
-            self._config["canvas"]["fill_drawing"]
-        )
         fill_editing = action(
-            self.tr("Fill Editing Shapes"),
-            self._canvas_widgets.canvas.set_fill_editing,
-            None,
+            text=self.tr("Fill Editing Shapes"),
             icon="phosphor/paint-bucket.svg",
             tip=self.tr("Fill selected or hovered shapes while editing"),
             checkable=True,
             enabled=True,
+            checked=self._config["canvas"]["fill_editing"],
         )
-        fill_editing.setChecked(self._config["canvas"]["fill_editing"])
-        self._canvas_widgets.canvas.set_fill_editing(fill_editing.isChecked())
         snap_to_existing_points = action(
-            self.tr("Snap to Existing Points"),
-            self._canvas_widgets.canvas.set_snap_to_existing_points,
-            None,
+            text=self.tr("Snap to Existing Points"),
             tip=self.tr(
                 "Snap new polygon vertices to nearby vertices in existing shapes"
             ),
             checkable=True,
-            checked=False,
+            checked=self._config["canvas"]["snap_to_existing_points"],
         )
         lock_cursor_to_pixels = action(
-            self.tr("Lock Cursor to Pixels"),
-            self._canvas_widgets.canvas.set_lock_cursor_to_pixels,
-            None,
+            text=self.tr("Lock Cursor to Pixels"),
             tip=self.tr("Snap cursor placement to whole image-pixel coordinates"),
             checkable=True,
-            checked=False,
+            checked=self._config["canvas"]["lock_cursor_to_pixels"],
         )
         show_center_dots = action(
-            self.tr("Show Center Dots"),
-            self._canvas_widgets.canvas.set_show_center_dots,
-            None,
+            text=self.tr("Show Center Dots"),
             tip=self.tr("Show center dots for rectangles and polygons"),
             checkable=True,
             enabled=True,
+            checked=self._config["canvas"]["show_center_dots"],
         )
-        show_center_dots.setChecked(self._config["canvas"]["show_center_dots"])
-        self._canvas_widgets.canvas.set_show_center_dots(show_center_dots.isChecked())
         hide_all = action(
             self.tr("&Hide\nShapes"),
             functools.partial(self.toggle_shape_visibility, False),
@@ -3903,7 +3897,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _set_zoom_speed(self, speed: int) -> None:
         if speed not in _ZOOM_SPEEDS:
             raise ValueError(f"Unsupported zoom speed: {speed}")
-        self._zoom_speed = speed
+        self._apply_setting_change(key_path=("canvas", "zoom_speed"), value=speed)
 
     def set_fit_window_mode(self, value: bool = True) -> None:
         target = _ZoomMode.FIT_WINDOW if value else _ZoomMode.MANUAL_ZOOM
@@ -4431,6 +4425,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     key_path=path, value=checked
                 )
             )
+            self._apply_to_live_widgets(key_path=key_path)
 
     def _on_ai_model_changed(self, model_id: str) -> None:
         self._canvas_widgets.canvas.set_ai_model_name(model_id)
@@ -4511,8 +4506,24 @@ class MainWindow(QtWidgets.QMainWindow):
             assert isinstance(value, bool)
             with QtCore.QSignalBlocker(action):
                 action.setChecked(value)
-            if key_path == ("canvas", "fill_drawing"):
-                self._canvas_widgets.canvas.set_fill_drawing(value)
+            canvas = self._canvas_widgets.canvas
+            canvas_setters: dict[tuple[str, ...], typing.Callable[[bool], None]] = {
+                ("canvas", "fill_drawing"): canvas.set_fill_drawing,
+                ("canvas", "fill_editing"): canvas.set_fill_editing,
+                ("canvas", "show_center_dots"): canvas.set_show_center_dots,
+                (
+                    "canvas",
+                    "snap_to_existing_points",
+                ): canvas.set_snap_to_existing_points,
+                ("canvas", "lock_cursor_to_pixels"): canvas.set_lock_cursor_to_pixels,
+            }
+            if key_path in canvas_setters:
+                canvas_setters[key_path](value)
+        elif key_path == ("canvas", "zoom_speed"):
+            self._zoom_speed = self._config["canvas"]["zoom_speed"]
+            for action in self._actions.zoom_speed_menu.actions():
+                with QtCore.QSignalBlocker(action):
+                    action.setChecked(action.data() == self._zoom_speed)
         elif key_path == ("shape", "show_labels"):
             canvas = self._canvas_widgets.canvas
             canvas.set_show_labels(self._config["shape"]["show_labels"])

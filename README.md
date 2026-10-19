@@ -252,6 +252,12 @@ nearby existing point. Dragging either of two polygon vertices already at the
 same position then moves both vertices together while this option remains
 enabled.
 
+Menu preferences are saved automatically and restored after restarting Labelme,
+including **Edit > Snap to Existing Points**, **Edit > Lock Cursor to Pixels**,
+**Edit > Zoom Speed**, **View > Fill Editing Shapes**, and
+**View > Show Center Dots**. You can also change these preferences in
+**Settings > Drawing and canvas**.
+
 ```bash
 labelme  # just open gui
 

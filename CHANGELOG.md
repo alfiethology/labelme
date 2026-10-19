@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed Snap to Existing Points, Lock Cursor to Pixels, Fill Editing Shapes, Show Center Dots, and Zoom Speed resetting after restarting Labelme; changes now save immediately and remain synchronized with Settings.
 - Fixed points and rectangle edges appearing half a pixel above and to the left of the drawing cursor by matching cursor and canvas stroke rasterization.
 - Fixed crosshair alignment with placed points and lines at fractional zoom levels and centered image offsets, and drawing endpoints using a stale mouse-move position instead of the click position.
 - Fixed Shift+Space in Change Labels mode removing the skipped image from the file list without loading its successor; the replacement row is now selected silently and loaded explicitly, including when removing a row causes the next item to inherit the same index.

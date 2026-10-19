@@ -26,6 +26,16 @@ def test_default_point_tool_shortcut_is_p() -> None:
     assert config["shortcuts"]["create_point"] == "P"
 
 
+@pytest.mark.parametrize("value", [0, 5, True, 2.5, "2", None])
+def test_invalid_zoom_speed_is_rejected(value: object) -> None:
+    with pytest.raises(
+        ValueError, match="canvas.zoom_speed must be an integer from 1 to 4"
+    ):
+        _config.load_config(
+            config_file=None, config_overrides={"canvas": {"zoom_speed": value}}
+        )
+
+
 def test_load_config_migrates_blank_point_tool_shortcut(tmp_path: Path) -> None:
     config_file = tmp_path / "config.yaml"
     config_file.write_text("shortcuts:\n  create_point:\n")

@@ -368,6 +368,10 @@ def test_keep_prev_dialog_toggle_checks_menu_action(
             ("keep_prev_brightness_contrast",),
         ),
         ("fill_drawing", ("canvas", "fill_drawing")),
+        ("fill_editing", ("canvas", "fill_editing")),
+        ("show_center_dots", ("canvas", "show_center_dots")),
+        ("snap_to_existing_points", ("canvas", "snap_to_existing_points")),
+        ("lock_cursor_to_pixels", ("canvas", "lock_cursor_to_pixels")),
     ],
 )
 def test_menu_toggle_persists_and_syncs_settings_dialog(
@@ -397,6 +401,126 @@ def test_menu_toggle_persists_and_syncs_settings_dialog(
     assert editor.isChecked() is expected
 
     close_or_pause(qtbot=qtbot, widget=win, pause=pause)
+
+    saved = editable_config_file.read_text()
+    reopened = main_win(config_file=editable_config_file)
+    assert getattr(reopened._actions, action_name).isChecked() is expected
+    reopened_dialog = _open_settings_dialog(win=reopened)
+    reopened_editor = reopened_dialog._editors[key_path]
+    assert isinstance(reopened_editor, QtWidgets.QCheckBox)
+    assert reopened_editor.isChecked() is expected
+    if key_path[0] == "canvas":
+        assert getattr(reopened._canvas_widgets.canvas, f"_{key_path[1]}") is expected
+    assert editable_config_file.read_text() == saved
+    close_or_pause(qtbot=qtbot, widget=reopened, pause=pause)
+
+
+@pytest.mark.gui
+@pytest.mark.parametrize(
+    "key",
+    [
+        "fill_editing",
+        "show_center_dots",
+        "snap_to_existing_points",
+        "lock_cursor_to_pixels",
+    ],
+)
+def test_canvas_settings_sync_menu_and_persist_after_restart(
+    main_win: MainWinFactory, editable_config_file: Path, key: str
+) -> None:
+    win = main_win(config_file=editable_config_file)
+    dialog = _open_settings_dialog(win=win)
+    editor = dialog._editors[("canvas", key)]
+    assert isinstance(editor, QtWidgets.QCheckBox)
+    expected = not editor.isChecked()
+    editor.setChecked(expected)
+    assert getattr(win._actions, key).isChecked() is expected
+    assert getattr(win._canvas_widgets.canvas, f"_{key}") is expected
+    assert not win._is_changed
+    win.close()
+    reopened = main_win(config_file=editable_config_file)
+    assert getattr(reopened._actions, key).isChecked() is expected
+    assert getattr(reopened._canvas_widgets.canvas, f"_{key}") is expected
+    getattr(reopened._actions, key).trigger()
+    assert "canvas" not in safe_load(editable_config_file.read_text())
+    reopened.close()
+    restored_default = main_win(config_file=editable_config_file)
+    assert getattr(restored_default._actions, key).isChecked() is not expected
+    assert getattr(restored_default._canvas_widgets.canvas, f"_{key}") is not expected
+
+
+@pytest.mark.gui
+def test_zoom_speed_is_shared_by_menu_and_settings_and_restored(
+    main_win: MainWinFactory, editable_config_file: Path
+) -> None:
+    win = main_win(config_file=editable_config_file)
+    dialog = _open_settings_dialog(win=win)
+    editor = dialog._editors[("canvas", "zoom_speed")]
+    assert isinstance(editor, QtWidgets.QComboBox)
+    actions = {a.data(): a for a in win._actions.zoom_speed_menu.actions()}
+    actions[4].trigger()
+    assert win._zoom_speed == 4
+    assert editor.currentData() == 4
+    assert safe_load(editable_config_file.read_text())["canvas"]["zoom_speed"] == 4
+    editor.setCurrentIndex(editor.findData(3))
+    assert win._zoom_speed == 3
+    assert actions[3].isChecked()
+    assert not actions[4].isChecked()
+    win.close()
+
+    saved = editable_config_file.read_text()
+    reopened = main_win(config_file=editable_config_file)
+    assert reopened._zoom_speed == 3
+    assert [
+        a.data() for a in reopened._actions.zoom_speed_menu.actions() if a.isChecked()
+    ] == [3]
+    assert editable_config_file.read_text() == saved
+    # Returning to the default must clear the override, then remain at that default.
+    reopened._set_zoom_speed(2)
+    assert "canvas" not in safe_load(editable_config_file.read_text())
+    reopened.close()
+    assert main_win(config_file=editable_config_file)._zoom_speed == 2
+
+
+@pytest.mark.gui
+def test_new_menu_preferences_revert_if_saving_fails(
+    main_win: MainWinFactory,
+    editable_config_file: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    win = main_win(config_file=editable_config_file)
+    dialog = _open_settings_dialog(win=win)
+    original_file = editable_config_file.read_text()
+
+    def fail_write(*args: object, **kwargs: object) -> None:
+        raise OSError("Cannot write settings")
+
+    monkeypatch.setattr("labelme._app._config.set_overrides", fail_write)
+    warnings: list[str] = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "warning", lambda *args: warnings.append(args[2])
+    )
+    for key in (
+        "fill_editing",
+        "show_center_dots",
+        "snap_to_existing_points",
+        "lock_cursor_to_pixels",
+    ):
+        action = getattr(win._actions, key)
+        original = action.isChecked()
+        action.trigger()
+        assert action.isChecked() is original
+        assert getattr(win._canvas_widgets.canvas, f"_{key}") is original
+        editor = dialog._editors[("canvas", key)]
+        assert isinstance(editor, QtWidgets.QCheckBox)
+        assert editor.isChecked() is original
+    actions = {a.data(): a for a in win._actions.zoom_speed_menu.actions()}
+    actions[4].trigger()
+    assert win._zoom_speed == 2
+    assert actions[2].isChecked()
+    assert not actions[4].isChecked()
+    assert len(warnings) == 5
+    assert editable_config_file.read_text() == original_file
 
 
 @pytest.mark.gui

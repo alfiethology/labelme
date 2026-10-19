@@ -138,6 +138,38 @@ SETTINGS: Final[tuple[Setting, ...]] = (
         kind="bool",
     ),
     Setting(
+        key_path=("canvas", "fill_editing"),
+        group="Drawing and canvas",
+        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Fill editing shapes")),
+        kind="bool",
+    ),
+    Setting(
+        key_path=("canvas", "show_center_dots"),
+        group="Drawing and canvas",
+        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Show center dots")),
+        kind="bool",
+    ),
+    Setting(
+        key_path=("canvas", "snap_to_existing_points"),
+        group="Drawing and canvas",
+        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Snap to existing points")),
+        kind="bool",
+    ),
+    Setting(
+        key_path=("canvas", "lock_cursor_to_pixels"),
+        group="Drawing and canvas",
+        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Lock cursor to pixels")),
+        kind="bool",
+    ),
+    Setting(
+        key_path=("canvas", "zoom_speed"),
+        group="Drawing and canvas",
+        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Zoom speed")),
+        kind="enum",
+        choices=(1, 2, 3, 4),
+        choice_labels=("1×", "2×", "3×", "4×"),
+    ),
+    Setting(
         key_path=("canvas", "allow_out_of_bounds_points"),
         group="Drawing and canvas",
         label=cast(
