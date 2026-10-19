@@ -7,6 +7,7 @@ import json
 import math
 import os
 import platform
+import random
 import re
 import shutil
 import subprocess
@@ -87,6 +88,7 @@ from ._widgets.class_color_dialog import ClassColorDialog
 from ._widgets.command_palette import Command
 from ._widgets.command_palette import CommandPalette
 from ._widgets.command_palette import collect_action_commands
+from ._widgets.quick_draw_dialog import QuickDrawDialog
 from ._yolo_predictions import shapes_from_yolo_result
 
 
@@ -94,6 +96,13 @@ class _ZoomMode(enum.Enum):
     FIT_WINDOW = enum.auto()
     FIT_WIDTH = enum.auto()
     MANUAL_ZOOM = enum.auto()
+
+
+@dataclasses.dataclass
+class _QuickDrawSession:
+    labels: tuple[str, ...]
+    remaining: list[str]
+    loading: bool = False
 
 
 _ZOOM_SPEEDS: Final[tuple[int, ...]] = (1, 2, 3, 4)
@@ -274,6 +283,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._zoom_speed = self._config["canvas"]["zoom_speed"]
         self._change_label_choices: dict[str, str] | None = None
         self._bounding_box_quick_edit_active = False
+        self._quick_draw: _QuickDrawSession | None = None
         self._change_label_index = 0
         self._change_label_input = ""
         self._docks = self._setup_dock_widgets()
@@ -345,6 +355,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._setup_toolbars()
 
         self._status_bar = self._setup_status_bar()
+        self._quick_draw_progress = QtWidgets.QLabel()
+        self.statusBar().addPermanentWidget(self._quick_draw_progress)
+        self._quick_draw_progress.hide()
 
         self._setup_app_state(file_or_dir=file_or_dir, output_dir=output_dir)
 
@@ -1065,10 +1078,20 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Space saves and opens the next image"
             ),
         )
+        self._quick_draw_action = action(
+            self.tr("Quick Draw…"),
+            self._toggle_quick_draw,
+            checkable=True,
+            tip=self.tr(
+                "Draw named bounding boxes on random unannotated images; "
+                "Space saves and moves on, Escape stops"
+            ),
+        )
         _utils.add_actions(
             tools_menu,
             (
                 self._bounding_box_quick_edit_action,
+                self._quick_draw_action,
                 action(
                     self.tr("Change Labels…"),
                     self._change_labels,
@@ -1321,6 +1344,159 @@ class MainWindow(QtWidgets.QMainWindow):
                     count=len(deleted)
                 ),
             )
+
+    def _toggle_quick_draw(self, enabled: bool) -> None:
+        if not enabled:
+            self._stop_quick_draw()
+            return
+        # The checkmark represents a running session, not the setup dialog.
+        self._quick_draw_action.setChecked(False)
+        if not self.image_list:
+            self.show_status_message(
+                self.tr("Open an image directory before starting Quick Draw."), 5000
+            )
+            return
+        dialog = QuickDrawDialog(self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        labels = dialog.label_sequence()
+        if not labels or not all(labels):
+            return
+        for label in dict.fromkeys(labels):
+            if not self.validate_label(label):
+                self.show_error_message(
+                    self.tr("Invalid label"),
+                    self.tr(
+                        "Quick Draw label '{label}' is not in the allowed labels."
+                    ).format(label=label),
+                )
+                return
+        if not self._can_continue():
+            return
+        remaining = [
+            path for path in self.image_list if self._quick_draw_eligible(path)
+        ]
+        if not remaining:
+            self.show_status_message(
+                self.tr("Quick Draw: no unannotated images in the current set."), 5000
+            )
+            return
+        self._stop_change_labels()
+        self._toggle_bounding_box_quick_edit(False)
+        self.toggle_zoom_rect(False)
+        self.mark_clean()  # _can_continue has saved or authorized discarding changes.
+        self._quick_draw = _QuickDrawSession(labels=labels, remaining=remaining)
+        self._quick_draw_action.setChecked(True)
+        self._open_next_quick_draw_image()
+
+    def _quick_draw_eligible(self, path: str) -> bool:
+        # Protect annotations in either the configured directory or beside the
+        # image. Even an empty JSON represents an already reviewed image.
+        return (
+            Path(path).is_file()
+            and not Path(path).with_suffix(LABEL_FILE_SUFFIX).exists()
+            and not Path(
+                _resolve_label_path(
+                    image_or_label_path=path, output_dir=self._output_dir
+                )
+            ).exists()
+            and not (path == self._image_path and self._canvas_widgets.canvas.shapes)
+        )
+
+    def _open_next_quick_draw_image(self) -> None:
+        session = self._quick_draw
+        if session is None:
+            return
+        # Recheck candidates at each advance: files may have been annotated or
+        # removed since setup. Each candidate is visited at most once per run.
+        current_set = set(self.image_list)
+        while session.remaining:
+            path = random.choice(session.remaining)
+            session.remaining.remove(path)
+            if path in current_set and self._quick_draw_eligible(path):
+                break
+        else:
+            self._stop_quick_draw()
+            self.show_status_message(
+                self.tr("Quick Draw complete: no unvisited unannotated images remain."),
+                10000,
+            )
+            return
+        session.loading = True
+        try:
+            self._load_file(image_or_label_path=path)
+        finally:
+            session.loading = False
+        if self._image_path != path or self._canvas_widgets.canvas.pixmap.isNull():
+            self._stop_quick_draw()
+            return
+        if self._canvas_widgets.canvas.shapes or self._label_file_path is not None:
+            # An annotation may have appeared after the eligibility check.
+            self._stop_quick_draw()
+            return
+        # A newly loaded, unannotated image has no shape history yet. Keep an
+        # empty snapshot so even the first completed box can be undone.
+        self._canvas_widgets.canvas.backup_shapes()
+        self._switch_canvas_mode(
+            edit=False, create_mode="rectangle", keep_quick_draw=True
+        )
+        self._canvas_widgets.canvas.setFocus()
+        self._update_quick_draw_progress()
+
+    def _update_quick_draw_progress(self) -> None:
+        session = self._quick_draw
+        if session is None:
+            return
+        completed = len(self._canvas_widgets.canvas.shapes)
+        if completed < len(session.labels):
+            text = self.tr(
+                "Quick Draw: box {index}/{total} — {label} | Space: next · Esc: stop"
+            ).format(
+                index=completed + 1,
+                total=len(session.labels),
+                label=session.labels[completed],
+            )
+        else:
+            text = self.tr(
+                "Quick Draw: {total}/{total} boxes | Space: save and next · Esc: stop"
+            ).format(total=len(session.labels))
+        self._quick_draw_progress.setText(text)
+        self._quick_draw_progress.show()
+
+    def _advance_quick_draw_image(self) -> None:
+        if self._quick_draw is None:
+            return
+        canvas = self._canvas_widgets.canvas
+        canvas._cancel_current_shape()
+        if self._is_changed and (canvas.shapes or self._label_file_path is not None):
+            if not self.save_labels(label_path=self.current_label_file_path()):
+                return
+        # Empty skips never create a JSON, including after undoing all boxes.
+        self.mark_clean()
+        self._open_next_quick_draw_image()
+
+    def _finish_quick_draw_image(
+        self, session: _QuickDrawSession, image_path: str | None
+    ) -> None:
+        # Defer navigation until Canvas has returned from its new_shape signal.
+        # Undo, manual navigation, or leaving the mode invalidates this callback.
+        if (
+            self._quick_draw is session
+            and self._image_path == image_path
+            and len(self._canvas_widgets.canvas.shapes) >= len(session.labels)
+            and QtWidgets.QApplication.activeModalWidget() is None
+        ):
+            self._advance_quick_draw_image()
+
+    def _stop_quick_draw(self) -> None:
+        if self._quick_draw is None:
+            return
+        self._quick_draw = None
+        self._quick_draw_action.setChecked(False)
+        self._quick_draw_progress.hide()
+        self._canvas_widgets.canvas._cancel_current_shape()
+        self._switch_canvas_mode(edit=True)
+        self.show_status_message(self.tr("Quick Draw stopped."), 5000)
 
     def _toggle_bounding_box_quick_edit(self, enabled: bool) -> None:
         if enabled and self._image.isNull():
@@ -1582,6 +1758,7 @@ class MainWindow(QtWidgets.QMainWindow):
         label = label.strip()
         if not accepted or not label:
             return
+        self._stop_quick_draw()
         self._skeleton_drawing_label = label
         self._canvas_widgets.canvas.start_skeleton_drawing()
         self._skeleton_place_action.setChecked(True)
@@ -1733,6 +1910,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tr("Open an image before creating a skeleton."),
             )
             return
+        self._stop_quick_draw()
         self._quick_skeleton_template = skeleton
         self._skeleton_drawing_label = skeleton.label
         self._canvas_widgets.canvas.start_skeleton_drawing(
@@ -3053,7 +3231,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Autosave does not clear the undo stack; keep the undo action available.
         self._actions.undo.setEnabled(self._canvas_widgets.canvas.can_restore_shape)
 
-        if self._actions.save_auto.isChecked():
+        if self._actions.save_auto.isChecked() and self._quick_draw is None:
             assert self._image_path is not None
             saved = self.save_labels(
                 label_path=_resolve_label_path(
@@ -3066,6 +3244,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._is_changed = True
         self._actions.save.setEnabled(True)
         self.setWindowTitle(self._get_window_title(dirty=True))
+        if self._quick_draw is not None:
+            # Undoing a completed box after a failed save resumes drawing it.
+            if len(self._canvas_widgets.canvas.shapes) < len(self._quick_draw.labels):
+                self._switch_canvas_mode(
+                    edit=False, create_mode="rectangle", keep_quick_draw=True
+                )
+            self._update_quick_draw_progress()
 
     def mark_clean(self) -> None:
         self._is_changed = False
@@ -3227,8 +3412,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._actions.delete.setEnabled(not drawing)
 
     def _switch_canvas_mode(
-        self, edit: bool = True, create_mode: str | None = None
+        self,
+        edit: bool = True,
+        create_mode: str | None = None,
+        *,
+        keep_quick_draw: bool = False,
     ) -> None:
+        if not keep_quick_draw:
+            self._stop_quick_draw()
         if self._bounding_box_quick_edit_active:
             self._toggle_bounding_box_quick_edit(False)
         if self._canvas_widgets.canvas.is_drawing_skeleton:
@@ -3802,6 +3993,18 @@ class MainWindow(QtWidgets.QMainWindow):
         flags: dict[str, bool] = {}
         group_id: int | None = None
         description = ""
+        quick_draw = self._quick_draw
+        if quick_draw is not None:
+            index = len(self._canvas_widgets.canvas.shapes) - 1
+            text = quick_draw.labels[index]
+            flags = {
+                key: False
+                for pattern, keys in compile_label_flags(
+                    self._config["label_flags"]
+                ).items()
+                if pattern.match(text)
+                for key in keys
+            }
         is_point_mode = self._canvas_widgets.canvas.create_mode == "point"
         if is_point_mode:
             cached = self._point_mode_label_state
@@ -3813,7 +4016,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 flags = dict(cached_flags)
 
         should_prompt = self._config["display_label_popup"] or not text
-        if is_point_mode and text:
+        if quick_draw is not None or (is_point_mode and text):
             should_prompt = False
         if should_prompt:
             previous_text = self._label_dialog.edit.text()
@@ -3860,6 +4063,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self._actions.undo_last_point.setEnabled(False)
             self._actions.undo.setEnabled(True)
             self.mark_dirty()
+            if quick_draw is not None and len(
+                self._canvas_widgets.canvas.shapes
+            ) >= len(quick_draw.labels):
+                self._switch_canvas_mode(edit=True, keep_quick_draw=True)
+                QtCore.QTimer.singleShot(
+                    0,
+                    functools.partial(
+                        self._finish_quick_draw_image, quick_draw, self._image_path
+                    ),
+                )
         else:
             self._canvas_widgets.canvas.undo_last_line()
             self._canvas_widgets.canvas.shape_backups.pop()
@@ -4056,6 +4269,8 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     def _load_file(self, image_or_label_path: str) -> None:
+        if self._quick_draw is not None and not self._quick_draw.loading:
+            self._stop_quick_draw()
         # changing fileListWidget loads file
         if image_or_label_path in self.image_list and (
             self._docks.file_list.currentRow()
@@ -4069,9 +4284,15 @@ class MainWindow(QtWidgets.QMainWindow):
 
         prev_shapes: list[Shape] = (
             self._canvas_widgets.canvas.shapes
-            if self._config["keep_prev"]
-            or QtWidgets.QApplication.keyboardModifiers()
-            == (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+            if self._quick_draw is None
+            and (
+                self._config["keep_prev"]
+                or QtWidgets.QApplication.keyboardModifiers()
+                == (
+                    Qt.KeyboardModifier.ControlModifier
+                    | Qt.KeyboardModifier.ShiftModifier
+                )
+            )
             else []
         )
         self._prev_image_path = self._image_path
@@ -4243,6 +4464,8 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if not self._can_continue():
             a0.ignore()
+        else:
+            self._stop_quick_draw()
         self._window_state.setValue("window/size", self.size())
         self._window_state.setValue("window/position", self.pos())
         self._window_state.setValue("window/state", self.saveState())
@@ -4438,6 +4661,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def close_file(self, _value: bool = False) -> None:
         if not self._can_continue():
             return
+        self._stop_quick_draw()
         if self._bounding_box_quick_edit_active:
             self._toggle_bounding_box_quick_edit(False)
         self.reset_state()
@@ -4870,6 +5094,22 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
         if (
+            self._quick_draw is not None
+            and watched is self._canvas_widgets.canvas
+            and isinstance(event, QtGui.QKeyEvent)
+            and event.type()
+            in (QtCore.QEvent.Type.ShortcutOverride, QtCore.QEvent.Type.KeyPress)
+            and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Escape)
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+        ):
+            event.accept()
+            if event.type() == QtCore.QEvent.Type.KeyPress and not event.isAutoRepeat():
+                if event.key() == Qt.Key.Key_Space:
+                    self._advance_quick_draw_image()
+                else:
+                    self._stop_quick_draw()
+            return True
+        if (
             self._bounding_box_quick_edit_active
             and watched is self._canvas_widgets.canvas
             and isinstance(event, QtGui.QKeyEvent)
@@ -5094,6 +5334,7 @@ class MainWindow(QtWidgets.QMainWindow):
         return lst
 
     def import_dropped_image_files(self, image_files: list[str]) -> None:
+        self._stop_quick_draw()
         extensions = _list_supported_image_extensions()
         already_loaded = set(self.image_list)
         new_files = [
@@ -5122,6 +5363,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if not self._can_continue() or not root_dir:
             return
+        self._stop_quick_draw()
 
         self._docks.file_dock.setEnabled(True)
         self._docks.file_dock.setToolTip("")

@@ -75,6 +75,8 @@ See [Animal pose annotation](docs/pose-estimation.md) for the complete workflow.
 
 ### Faster manual editing
 
+- [Draw repeated objects with Quick Draw](#draw-repeated-objects-with-quick-draw)
+  on randomly chosen unannotated images, with automatic saving and advance.
 - Snap new and existing polygon vertices to points in other annotations, then
   drag coincident polygon vertices together while snapping remains enabled.
 - [Review existing annotations with Change Labels](#review-existing-annotations-with-change-labels)
@@ -313,6 +315,32 @@ cd examples/semantic_segmentation
 labelme data_annotated/  # Open directory to annotate all images in it
 labelme data_annotated/ --labels labels.txt  # specify label list with a file
 ```
+
+### Draw repeated objects with Quick Draw
+
+Open an image directory, then choose **Tools > Quick Draw…**. Enter each object
+name and how many boxes to draw for it on every image. Add rows for different
+objects; boxes are requested in row order. This initial version supports bounding
+boxes, drawn with the usual two corner clicks.
+
+Quick Draw randomly chooses images from the current File List that have no JSON
+annotation file. The status bar shows which object to draw next. Labels are
+assigned automatically, and completing the requested number of boxes saves the
+annotations and opens another random image. JSONs go beside their images, or into
+the annotation directory configured with **File > Change Output Dir**.
+
+- **Space** saves the boxes already completed and advances early. With no boxes,
+  it skips the image without creating an empty JSON. An unfinished box is discarded.
+- **Escape**, or unchecking **Tools > Quick Draw…**, stops the run. Completed boxes
+  on the current image remain available to save or undo normally.
+- Each image is visited at most once per run, including skipped images. Starting
+  another run makes skipped images available again. Existing JSONs, including
+  empty annotation files, are left alone.
+
+The run stops when no eligible images remain. A failed save keeps the current
+image open; press Space to retry. Selecting another image or drawing mode also
+stops Quick Draw. Keep Previous Annotation is bypassed during the run, and
+Bounding Box Quick Edit remains a separate mode for existing boxes.
 
 ### Review existing annotations with Change Labels
 

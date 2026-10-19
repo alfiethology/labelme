@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Tools > Quick Draw for drawing an ordered set of named bounding boxes on random unannotated images, automatically saving and advancing when complete; Space saves partial annotations or skips empty images, and Escape exits.
 - Added a Ctrl+P command palette for searching menu commands, tools, and settings, with keyboard navigation, shortcut hints, current toggle states, and direct access to setting controls.
 - Added a first-save choice for each session: save new JSON annotations beside their images without a file chooser, or continue choosing JSON paths manually. Save As and explicitly configured output directories retain their existing behaviour.
 - Added View > Black Canvas Background and a matching Settings checkbox to switch the image surround between white and black, with the choice remembered between restarts.
