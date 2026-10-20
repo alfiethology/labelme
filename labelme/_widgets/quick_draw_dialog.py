@@ -5,24 +5,59 @@ from PySide6 import QtWidgets
 
 
 class _ObjectNameDelegate(QtWidgets.QStyledItemDelegate):
+    def __init__(self, labels: tuple[str, ...], parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent)
+        self._labels = labels
+
     def createEditor(
         self,
         parent: QtWidgets.QWidget,
         option: QtWidgets.QStyleOptionViewItem,
         index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
     ) -> QtWidgets.QWidget:
-        editor = super().createEditor(parent, option, index)
-        if isinstance(editor, QtWidgets.QLineEdit):
-            # Validate while typing so a disabled Start button doesn't force
-            # the user to commit the cell with Enter or Tab before clicking it.
-            editor.textEdited.connect(lambda: self.commitData.emit(editor))
+        editor = QtWidgets.QComboBox(parent)
+        editor.setEditable(True)
+        editor.setInsertPolicy(QtWidgets.QComboBox.InsertPolicy.NoInsert)
+        editor.addItems(self._labels)
+        completer = editor.completer()
+        assert completer is not None
+        completer.setCaseSensitivity(QtCore.Qt.CaseSensitivity.CaseInsensitive)
+        completer.setFilterMode(QtCore.Qt.MatchFlag.MatchContains)
+        # Validate while typing, without requiring Enter or Tab before Start.
+        editor.editTextChanged.connect(lambda: self.commitData.emit(editor))
+        if self._labels:
+            QtCore.QTimer.singleShot(0, editor.showPopup)
         return editor
+
+    def setEditorData(
+        self,
+        editor: QtWidgets.QWidget,
+        index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
+    ) -> None:
+        assert isinstance(editor, QtWidgets.QComboBox)
+        blocker = QtCore.QSignalBlocker(editor)
+        editor.setEditText(index.data(QtCore.Qt.ItemDataRole.EditRole) or "")
+        del blocker
+
+    def setModelData(
+        self,
+        editor: QtWidgets.QWidget,
+        model: QtCore.QAbstractItemModel,
+        index: QtCore.QModelIndex | QtCore.QPersistentModelIndex,
+    ) -> None:
+        assert isinstance(editor, QtWidgets.QComboBox)
+        model.setData(index, editor.currentText(), QtCore.Qt.ItemDataRole.EditRole)
 
 
 class QuickDrawDialog(QtWidgets.QDialog):
     """Configure the ordered objects to draw on every image in a session."""
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None = None,
+        *,
+        labels: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle(self.tr("Quick Draw"))
         self.resize(480, 360)
@@ -40,7 +75,7 @@ class QuickDrawDialog(QtWidgets.QDialog):
         help_text.setWordWrap(True)
         layout.addWidget(help_text)
         self.table = QtWidgets.QTableWidget(0, 2)
-        self.table.setItemDelegateForColumn(0, _ObjectNameDelegate(self.table))
+        self.table.setItemDelegateForColumn(0, _ObjectNameDelegate(labels, self.table))
         self.table.setHorizontalHeaderLabels(
             [self.tr("Object name"), self.tr("Boxes per image")]
         )
@@ -51,7 +86,16 @@ class QuickDrawDialog(QtWidgets.QDialog):
             QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
         )
         self.table.itemChanged.connect(self._update_total)
+        self.table.clicked.connect(self._edit_object_name)
         layout.addWidget(self.table)
+        count_hint = QtWidgets.QLabel(
+            self.tr(
+                "(0 for no limit). Put an unlimited object in the last row; "
+                "press Space to save and move on."
+            )
+        )
+        count_hint.setWordWrap(True)
+        layout.addWidget(count_hint)
         row_buttons = QtWidgets.QHBoxLayout()
         add = QtWidgets.QPushButton(self.tr("Add object"))
         add.clicked.connect(self.add_object)
@@ -78,12 +122,19 @@ class QuickDrawDialog(QtWidgets.QDialog):
         row = self.table.rowCount()
         self.table.insertRow(row)
         count = QtWidgets.QSpinBox()
-        count.setRange(1, 9999)
+        count.setRange(0, 9999)
+        count.setValue(1)
         count.valueChanged.connect(self._update_total)
         self.table.setCellWidget(row, 1, count)
         self.table.setItem(row, 0, QtWidgets.QTableWidgetItem(""))
         self.table.setCurrentCell(row, 0)
         self._update_total()
+
+    def _edit_object_name(self, index: QtCore.QModelIndex) -> None:
+        if index.column() == 0:
+            item = self.table.item(index.row(), 0)
+            assert item is not None
+            self.table.editItem(item)
 
     def _remove_selected(self) -> None:
         rows = {index.row() for index in self.table.selectedIndexes()}
@@ -100,15 +151,39 @@ class QuickDrawDialog(QtWidgets.QDialog):
             labels.extend([item.text().strip()] * count.value())
         return tuple(labels)
 
+    def unlimited_label(self) -> str | None:
+        if not self.table.rowCount():
+            return None
+        row = self.table.rowCount() - 1
+        count = self.table.cellWidget(row, 1)
+        item = self.table.item(row, 0)
+        assert item is not None and isinstance(count, QtWidgets.QSpinBox)
+        return item.text().strip() if count.value() == 0 else None
+
+    def is_valid(self) -> bool:
+        if not self.table.rowCount():
+            return False
+        for row in range(self.table.rowCount()):
+            item = self.table.item(row, 0)
+            count = self.table.cellWidget(row, 1)
+            assert item is not None and isinstance(count, QtWidgets.QSpinBox)
+            if not item.text().strip():
+                return False
+            if count.value() == 0 and row != self.table.rowCount() - 1:
+                return False
+        return True
+
     def _update_total(self) -> None:
         labels = self.label_sequence()
-        self.total.setText(
-            self.tr("Total boxes per image: {count}").format(count=len(labels))
-        )
-        self.start_button.setEnabled(bool(labels) and all(labels))
+        if self.unlimited_label() is not None:
+            self.total.setText(self.tr("Total boxes per image: no limit"))
+        else:
+            self.total.setText(
+                self.tr("Total boxes per image: {count}").format(count=len(labels))
+            )
+        self.start_button.setEnabled(self.is_valid())
 
     def accept(self) -> None:
         # Also guard programmatic acceptance and Enter while a cell is edited.
-        labels = self.label_sequence()
-        if labels and all(labels):
+        if self.is_valid():
             super().accept()

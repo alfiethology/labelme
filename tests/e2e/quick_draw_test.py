@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
 from labelme._app import MainWindow
+from labelme._widgets.canvas import _CanvasMode
 from labelme._widgets.quick_draw_dialog import QuickDrawDialog
 
 from .conftest import MainWinFactory
@@ -162,22 +163,22 @@ def test_auto_save_is_deferred_and_keep_previous_does_not_copy_boxes(
     assert win._actions.toggle_keep_prev_mode.isChecked()
 
 
-@pytest.mark.parametrize("complete", [False, True])
+@pytest.mark.parametrize("count", [0, 1, 2])
 def test_save_failure_keeps_image_and_space_retries(
     quick_draw_win: MainWindow,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
-    complete: bool,
+    count: int,
 ) -> None:
     win = quick_draw_win
-    _configure(monkeypatch, (("cat", 1 if complete else 2),))
+    _configure(monkeypatch, (("cat", count),))
     win._toggle_quick_draw(True)
     original_path = win._image_path
     assert original_path is not None
     save = win.save_labels
     monkeypatch.setattr(win, "save_labels", lambda **kwargs: False)
     _box(win, qtbot)
-    if not complete:
+    if count != 1:
         qtbot.keyClick(win._canvas_widgets.canvas, Qt.Key.Key_Space)
     assert win._image_path == original_path
     assert win._is_changed
@@ -257,11 +258,13 @@ def test_cancel_setup_leaves_existing_mode_and_image(
     assert win._bounding_box_quick_edit_active
 
 
+@pytest.mark.parametrize("count", [0, 1])
 def test_setup_rejects_labels_outside_exact_vocabulary(
     main_win: MainWinFactory,
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
+    count: int,
 ) -> None:
     Image.new("RGB", (100, 100)).save(tmp_path / "a.png")
     win = main_win(
@@ -269,7 +272,7 @@ def test_setup_rejects_labels_outside_exact_vocabulary(
         config_overrides={"validate_label": "exact", "labels": ["cat"]},
     )
     show_window_and_wait_for_imagedata(qtbot, win)
-    _configure(monkeypatch, (("dog", 1),))
+    _configure(monkeypatch, (("dog", count),))
     errors: list[str] = []
     monkeypatch.setattr(
         win, "show_error_message", lambda title, message: errors.append(message)
@@ -426,12 +429,155 @@ def test_dialog_accepts_name_entered_through_table_editor(qtbot: QtBot) -> None:
     item = dialog.table.item(0, 0)
     assert item is not None
     dialog.table.editItem(item)
-    editor = dialog.table.viewport().findChild(
-        QtWidgets.QLineEdit, options=Qt.FindChildOption.FindDirectChildrenOnly
+    combo = dialog.table.viewport().findChild(
+        QtWidgets.QComboBox, options=Qt.FindChildOption.FindDirectChildrenOnly
     )
+    assert combo is not None
+    editor = combo.lineEdit()
     assert editor is not None
     qtbot.keyClicks(editor, "cat")
     qtbot.waitUntil(dialog.start_button.isEnabled)
     qtbot.mouseClick(dialog.start_button, Qt.MouseButton.LeftButton)
     assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
     assert dialog.label_sequence() == ("cat",)
+
+
+@pytest.mark.parametrize("prefix", [(), (("cat", 2),)])
+def test_unlimited_boxes_wait_for_space_and_restart_counts_on_next_image(
+    quick_draw_win: MainWindow,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    prefix: tuple[tuple[str, int], ...],
+) -> None:
+    win = quick_draw_win
+    _configure(monkeypatch, (*prefix, ("dog", 0)))
+    win._toggle_quick_draw(True)
+    path = _path(win)
+    canvas = win._canvas_widgets.canvas
+    expected = ["cat", "cat", "dog", "dog"] if prefix else ["dog"] * 4
+    for label in expected:
+        _box(win, qtbot)
+        assert canvas.shapes[-1].label == label
+        assert _path(win) == path
+        assert not path.with_suffix(".json").exists()
+        assert canvas.mode == _CanvasMode.CREATE
+    assert "no limit" in win._quick_draw_progress.text()
+    win.undo_shape_edit()
+    _box(win, qtbot)
+    assert [shape.label for shape in canvas.shapes] == expected
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    assert _path(win).name == "b.png"
+    data = json.loads(path.with_suffix(".json").read_text())
+    assert [shape["label"] for shape in data["shapes"]] == expected
+    _box(win, qtbot)
+    assert canvas.shapes[0].label == expected[0]
+    assert win._quick_draw is not None
+
+
+def test_unlimited_empty_image_is_skipped_without_json(
+    quick_draw_win: MainWindow, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win = quick_draw_win
+    _configure(monkeypatch, (("cat", 0),))
+    win._toggle_quick_draw(True)
+    path = _path(win)
+    qtbot.keyClick(win._canvas_widgets.canvas, Qt.Key.Key_Space)
+    assert _path(win).name == "b.png"
+    assert not path.with_suffix(".json").exists()
+
+
+def test_dialog_zero_requires_name_and_last_row(qtbot: QtBot) -> None:
+    dialog = QuickDrawDialog()
+    qtbot.addWidget(dialog)
+    item = dialog.table.item(0, 0)
+    count = dialog.table.cellWidget(0, 1)
+    assert item is not None and isinstance(count, QtWidgets.QSpinBox)
+    count.setValue(0)
+    assert not dialog.start_button.isEnabled()
+    item.setText(" cat ")
+    assert dialog.start_button.isEnabled()
+    assert dialog.label_sequence() == ()
+    assert dialog.unlimited_label() == "cat"
+    assert "no limit" in dialog.total.text()
+    assert any(
+        "(0 for no limit)" in label.text()
+        for label in dialog.findChildren(QtWidgets.QLabel)
+    )
+    dialog.add_object()
+    second = dialog.table.item(1, 0)
+    second_count = dialog.table.cellWidget(1, 1)
+    assert second is not None and isinstance(second_count, QtWidgets.QSpinBox)
+    second.setText("dog")
+    assert not dialog.start_button.isEnabled()
+    dialog.accept()
+    assert dialog.result() == QtWidgets.QDialog.DialogCode.Rejected
+    count.setValue(1)
+    second_count.setValue(0)
+    assert dialog.start_button.isEnabled()
+    assert dialog.label_sequence() == ("cat",)
+    assert dialog.unlimited_label() == "dog"
+    dialog.accept()
+    assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
+
+
+def test_name_click_shows_labels_and_allows_new_name(qtbot: QtBot) -> None:
+    dialog = QuickDrawDialog(labels=("cat", "dog"))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    item = dialog.table.item(0, 0)
+    assert item is not None
+    qtbot.mouseClick(
+        dialog.table.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=dialog.table.visualItemRect(item).center(),
+    )
+    combo = dialog.table.viewport().findChild(
+        QtWidgets.QComboBox, options=Qt.FindChildOption.FindDirectChildrenOnly
+    )
+    assert combo is not None
+    qtbot.waitUntil(combo.view().isVisible)
+    assert [combo.itemText(i) for i in range(combo.count())] == ["cat", "dog"]
+    # Clicking a suggestion commits it and enables Start immediately.
+    choice = combo.model().index(1, 0)
+    qtbot.mouseClick(
+        combo.view().viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=combo.view().visualRect(choice).center(),
+    )
+    assert dialog.label_sequence() == ("dog",)
+    assert dialog.start_button.isEnabled()
+    editor = combo.lineEdit()
+    assert editor is not None
+    editor.selectAll()
+    qtbot.keyClicks(editor, "snake")
+    qtbot.waitUntil(dialog.start_button.isEnabled)
+    qtbot.mouseClick(dialog.start_button, Qt.MouseButton.LeftButton)
+    assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
+    assert dialog.label_sequence() == ("snake",)
+
+
+def test_setup_suggestions_include_current_label_list_and_unopened_jsons(
+    quick_draw_win: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win = quick_draw_win
+    # The JSON appears after opening the folder, so setup must refresh names.
+    (_path(win).parent / "b.json").write_text(
+        json.dumps({"shapes": [{"label": "snake"}]})
+    )
+    label_list = win._docks.unique_label_list
+    label_list.add_label_item("cat", (255, 0, 0))
+    labels: list[str] = []
+
+    def inspect(dialog: QuickDrawDialog) -> int:
+        delegate = dialog.table.itemDelegateForColumn(0)
+        assert delegate is not None
+        editor = delegate.createEditor(
+            dialog, QtWidgets.QStyleOptionViewItem(), dialog.table.model().index(0, 0)
+        )
+        assert isinstance(editor, QtWidgets.QComboBox)
+        labels.extend(editor.itemText(i) for i in range(editor.count()))
+        return QtWidgets.QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(QuickDrawDialog, "exec", inspect)
+    win._toggle_quick_draw(True)
+    assert set(labels) == {"cat", "snake"}

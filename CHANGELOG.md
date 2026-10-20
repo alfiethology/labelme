@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Updated Quick Draw setup with editable object-name suggestions from the current Label List and a 0 boxes-per-image option for unlimited drawing until Space saves and advances.
 - Renamed Bounding Box Quick Edit to Bounding Box Shape Quick Edit to distinguish geometry editing from class-name editing.
 - Moved Keep Previous Annotation from Ctrl+P to Ctrl+Shift+P to make room for the command palette; existing Ctrl+P bindings for that command are migrated automatically.
 - Enabled brightness/contrast carry-over by default: images without their own adjustments use the most recently changed values, while returning to an adjusted image restores that image's settings.

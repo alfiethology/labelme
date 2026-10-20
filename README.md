@@ -380,9 +380,12 @@ back. Cancel the label picker to leave everything unchanged.
 ### Draw repeated objects with Quick Draw
 
 Open an image directory, then choose **Tools > Quick Draw…**. Enter each object
-name and how many boxes to draw for it on every image. Add rows for different
-objects; boxes are requested in row order. This initial version supports bounding
-boxes, drawn with the usual two corner clicks.
+name and how many boxes to draw for it on every image. Click an object name to
+choose from the current Label List, or type a new name. Add rows for different
+objects; boxes are requested in row order. Set **Boxes per image** to **0** for
+no limit: keep drawing that object until you press **Space** to save and move on.
+An unlimited object must be the last row, after any fixed counts. This initial
+version supports bounding boxes, drawn with the usual two corner clicks.
 
 Quick Draw randomly chooses images from the current File List that have no JSON
 annotation file. The status bar shows which object to draw next. Labels are

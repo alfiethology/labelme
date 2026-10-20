@@ -110,7 +110,17 @@ class _ZoomMode(enum.Enum):
 class _QuickDrawSession:
     labels: tuple[str, ...]
     remaining: list[str]
+    unlimited_label: str | None = None
     loading: bool = False
+
+    def label_for(self, index: int) -> str:
+        if index < len(self.labels):
+            return self.labels[index]
+        assert self.unlimited_label is not None
+        return self.unlimited_label
+
+    def is_complete(self, count: int) -> bool:
+        return self.unlimited_label is None and count >= len(self.labels)
 
 
 _ZOOM_SPEEDS: Final[tuple[int, ...]] = (1, 2, 3, 4)
@@ -1376,13 +1386,23 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tr("Open an image directory before starting Quick Draw."), 5000
             )
             return
-        dialog = QuickDrawDialog(self)
+        self._refresh_class_labels()
+        label_list = self._docks.unique_label_list
+        suggestions = tuple(
+            label_list.item(row).data(Qt.ItemDataRole.UserRole)
+            for row in range(label_list.count())
+        )
+        dialog = QuickDrawDialog(self, labels=suggestions)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
-        labels = dialog.label_sequence()
-        if not labels or not all(labels):
+        if not dialog.is_valid():
             return
-        for label in dict.fromkeys(labels):
+        labels = dialog.label_sequence()
+        unlimited_label = dialog.unlimited_label()
+        all_labels = labels + (
+            (unlimited_label,) if unlimited_label is not None else ()
+        )
+        for label in dict.fromkeys(all_labels):
             if not self.validate_label(label):
                 self.show_error_message(
                     self.tr("Invalid label"),
@@ -1406,7 +1426,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._toggle_class_name_quick_edit(False)
         self.toggle_zoom_rect(False)
         self.mark_clean()  # _can_continue has saved or authorized discarding changes.
-        self._quick_draw = _QuickDrawSession(labels=labels, remaining=remaining)
+        self._quick_draw = _QuickDrawSession(
+            labels=labels, remaining=remaining, unlimited_label=unlimited_label
+        )
         self._quick_draw_action.setChecked(True)
         self._open_next_quick_draw_image()
 
@@ -1469,7 +1491,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if session is None:
             return
         completed = len(self._canvas_widgets.canvas.shapes)
-        if completed < len(session.labels):
+        if session.unlimited_label is not None:
+            text = self.tr(
+                "Quick Draw: box {index} — {label} (no limit) | "
+                "Space: save and next · Esc: stop"
+            ).format(index=completed + 1, label=session.label_for(completed))
+        elif not session.is_complete(completed):
             text = self.tr(
                 "Quick Draw: box {index}/{total} — {label} | Space: next · Esc: stop"
             ).format(
@@ -1504,7 +1531,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if (
             self._quick_draw is session
             and self._image_path == image_path
-            and len(self._canvas_widgets.canvas.shapes) >= len(session.labels)
+            and session.is_complete(len(self._canvas_widgets.canvas.shapes))
             and QtWidgets.QApplication.activeModalWidget() is None
         ):
             self._advance_quick_draw_image()
@@ -3340,7 +3367,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle(self._get_window_title(dirty=True))
         if self._quick_draw is not None:
             # Undoing a completed box after a failed save resumes drawing it.
-            if len(self._canvas_widgets.canvas.shapes) < len(self._quick_draw.labels):
+            if not self._quick_draw.is_complete(
+                len(self._canvas_widgets.canvas.shapes)
+            ):
                 self._switch_canvas_mode(
                     edit=False, create_mode="rectangle", keep_quick_draw=True
                 )
@@ -4330,7 +4359,7 @@ class MainWindow(QtWidgets.QMainWindow):
         quick_draw = self._quick_draw
         if quick_draw is not None:
             index = len(self._canvas_widgets.canvas.shapes) - 1
-            text = quick_draw.labels[index]
+            text = quick_draw.label_for(index)
             flags = {
                 key: False
                 for pattern, keys in compile_label_flags(
@@ -4398,9 +4427,9 @@ class MainWindow(QtWidgets.QMainWindow):
             self._actions.undo_last_point.setEnabled(False)
             self._actions.undo.setEnabled(True)
             self.mark_dirty()
-            if quick_draw is not None and len(
-                self._canvas_widgets.canvas.shapes
-            ) >= len(quick_draw.labels):
+            if quick_draw is not None and quick_draw.is_complete(
+                len(self._canvas_widgets.canvas.shapes)
+            ):
                 self._switch_canvas_mode(edit=True, keep_quick_draw=True)
                 QtCore.QTimer.singleShot(
                     0,
