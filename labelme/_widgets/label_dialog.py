@@ -56,6 +56,8 @@ class LabelDialog(QtWidgets.QDialog):
         self._sort_labels = sort_labels
         self._flags_spec = compile_label_flags(label_flags=flags)
         self._label_history = label_history[:] if label_history is not None else []
+        self._predefined_labels = list(labels or [])
+        self._dataset_labels: list[str] = []
         self._flags_disabled = False
         # The flags currently on show, keyed by flag name, so a flag named by
         # two matching label_flags patterns gets exactly one checkbox.
@@ -161,14 +163,15 @@ class LabelDialog(QtWidgets.QDialog):
         self.label_list.itemDoubleClicked.connect(self._on_item_double_clicked)
 
         # Populate initial labels
-        for label in dict.fromkeys([*(labels or []), *self._label_history]):
-            self.label_list.addItem(label)
-        if sort_labels:
-            self.label_list.sortItems()
+        self._rebuild_labels()
 
     @property
     def label_history(self) -> list[str]:
         return self._label_history[:]
+
+    @property
+    def dataset_labels(self) -> list[str]:
+        return self._dataset_labels[:]
 
     def _make_completer(self, completion: str) -> QtWidgets.QCompleter:
         if completion == "startswith":
@@ -238,9 +241,18 @@ class LabelDialog(QtWidgets.QDialog):
                 self.label_list.sortItems()
 
     def set_predefined_labels(self, labels: list[str]) -> None:
-        history_extras = [h for h in self._label_history if h not in labels]
-        all_labels = list(dict.fromkeys(labels)) + history_extras
+        self._predefined_labels = list(labels)
+        self._rebuild_labels()
 
+    def set_dataset_labels(self, labels: list[str]) -> None:
+        if labels != self._dataset_labels:
+            self._dataset_labels = list(labels)
+            self._rebuild_labels()
+
+    def _rebuild_labels(self) -> None:
+        all_labels = dict.fromkeys(
+            [*self._predefined_labels, *self._dataset_labels, *self._label_history]
+        )
         self.label_list.clear()
         for label in all_labels:
             self.label_list.addItem(label)

@@ -63,6 +63,19 @@ def test_set_predefined_labels_empty_keeps_only_session_history(
     assert _labels(dialog) == {"ad-hoc"}
 
 
+def test_dataset_labels_combine_with_predefined_and_unsaved_history(
+    dialog: LabelDialog,
+) -> None:
+    dialog.add_label_history("unsaved-name")
+    dialog.set_dataset_labels(["cat", "bird", "bird"])
+    assert _labels(dialog) == {"cat", "dog", "bird", "unsaved-name"}
+    assert "bird" not in dialog.label_history
+    dialog.set_predefined_labels(["new-default"])
+    assert _labels(dialog) == {"new-default", "cat", "bird", "unsaved-name"}
+    dialog.set_dataset_labels(["new-dataset-name"])
+    assert _labels(dialog) == {"new-default", "new-dataset-name", "unsaved-name"}
+
+
 def test_update_flags_skips_an_invalid_pattern(qtbot: QtBot) -> None:
     dialog = LabelDialog(labels=["cat"], flags={"cat(": ["occluded"]})
     qtbot.addWidget(dialog)

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Tools > Class Name Quick Edit: click any visible shape, then click a suggested class name to relabel only that shape; suggestions include every JSON in the current File List, Space saves and advances, and Escape exits.
+- Populated label pickers with every distinct class name found in the current File List's JSON annotations, including unopened images, and made names entered through Edit Label available immediately without drawing another shape.
 - Added Label List > Change Class Name… with a clear warning that renaming updates all instances in all JSONs in the current File List; class colours, visibility, metadata, and unrelated unsaved edits are preserved.
 - Added Label List > Merge with… to merge an exact class name into another across the current File List's JSON annotations and the open image, removing the retired name from the sidebar and label suggestions while preserving other annotation data and unsaved edits.
 - Added Tools > Quick Draw for drawing an ordered set of named bounding boxes on random unannotated images, automatically saving and advancing when complete; Space saves partial annotations or skips empty images, and Escape exits.
@@ -26,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Renamed Bounding Box Quick Edit to Bounding Box Shape Quick Edit to distinguish geometry editing from class-name editing.
 - Moved Keep Previous Annotation from Ctrl+P to Ctrl+Shift+P to make room for the command palette; existing Ctrl+P bindings for that command are migrated automatically.
 - Enabled brightness/contrast carry-over by default: images without their own adjustments use the most recently changed values, while returning to an adjusted image restores that image's settings.
 - Reduced yellow drawing crosshairs from two pixels to one pixel thick.

@@ -58,6 +58,7 @@ from ._label_merge import LabelMergeError
 from ._label_merge import prepare_label_changes
 from ._label_merge import read_label_documents
 from ._label_merge import write_label_changes
+from ._label_names import LabelNameIndex
 from ._pose import SkeletonTemplate
 from ._pose import ensure_skeleton_axis_aligned_bbox
 from ._pose import make_skeleton_shape
@@ -91,6 +92,7 @@ from ._widgets import read_label_shortcuts
 from ._widgets._shape_render import SKELETON_NODE_LABEL_FONT_SIZE
 from ._widgets.class_color_dialog import ClassColorDialog
 from ._widgets.class_name_dialog import ClassNameDialog
+from ._widgets.class_name_quick_edit import ClassNameQuickEditPopup
 from ._widgets.command_palette import Command
 from ._widgets.command_palette import CommandPalette
 from ._widgets.command_palette import collect_action_commands
@@ -280,6 +282,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._shape_clipboard = ShapeClipboard(self)
 
         self._label_dialog = self._make_label_dialog()
+        self._label_name_index = LabelNameIndex()
 
         self._prev_opened_dir = None
         self._label_list_menu_origin: QtCore.QPoint | None = None
@@ -289,6 +292,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._zoom_speed = self._config["canvas"]["zoom_speed"]
         self._change_label_choices: dict[str, str] | None = None
         self._bounding_box_quick_edit_active = False
+        self._class_name_quick_edit_active = False
         self._quick_draw: _QuickDrawSession | None = None
         self._change_label_index = 0
         self._change_label_input = ""
@@ -1076,11 +1080,20 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         _utils.add_actions(help_menu, (help_, self._actions.about))
         self._bounding_box_quick_edit_action = action(
-            self.tr("Bounding Box Quick Edit"),
+            self.tr("Bounding Box Shape Quick Edit"),
             self._toggle_bounding_box_quick_edit,
             checkable=True,
             tip=self.tr(
                 "Reposition rectangles with two clicks; "
+                "Space saves and opens the next image"
+            ),
+        )
+        self._class_name_quick_edit_action = action(
+            self.tr("Class Name Quick Edit"),
+            self._toggle_class_name_quick_edit,
+            checkable=True,
+            tip=self.tr(
+                "Click any shape, then a class name; "
                 "Space saves and opens the next image"
             ),
         )
@@ -1097,6 +1110,7 @@ class MainWindow(QtWidgets.QMainWindow):
             tools_menu,
             (
                 self._bounding_box_quick_edit_action,
+                self._class_name_quick_edit_action,
                 self._quick_draw_action,
                 action(
                     self.tr("Change Labels…"),
@@ -1389,6 +1403,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._stop_change_labels()
         self._toggle_bounding_box_quick_edit(False)
+        self._toggle_class_name_quick_edit(False)
         self.toggle_zoom_rect(False)
         self.mark_clean()  # _can_continue has saved or authorized discarding changes.
         self._quick_draw = _QuickDrawSession(labels=labels, remaining=remaining)
@@ -1504,6 +1519,70 @@ class MainWindow(QtWidgets.QMainWindow):
         self._switch_canvas_mode(edit=True)
         self.show_status_message(self.tr("Quick Draw stopped."), 5000)
 
+    def _toggle_class_name_quick_edit(self, enabled: bool) -> None:
+        if enabled and self._image.isNull():
+            self._class_name_quick_edit_action.setChecked(False)
+            self.show_status_message(
+                self.tr("Open an image before changing class names."), 5000
+            )
+            return
+        if enabled:
+            self._stop_change_labels()
+            self._switch_canvas_mode(edit=True)
+            self.toggle_zoom_rect(False)
+        self._class_name_quick_edit_active = enabled
+        self._class_name_quick_edit_action.setChecked(enabled)
+        self._canvas_widgets.canvas.set_class_name_quick_edit(enabled)
+        self._actions.undo.setEnabled(self._canvas_widgets.canvas.can_restore_shape)
+        self._canvas_widgets.canvas.setFocus()
+
+    def _quick_edit_class_name(self, shape: Shape, position: QtCore.QPoint) -> None:
+        canvas = self._canvas_widgets.canvas
+        if (
+            not self._class_name_quick_edit_active
+            or shape not in canvas.shapes
+            or not shape.label
+        ):
+            return
+        self._refresh_label_dialog_labels()
+        labels = self._label_dialog.label_list
+        choices = [labels.item(row).text() for row in range(labels.count())]
+        popup = ClassNameQuickEditPopup(
+            labels=choices, current_label=shape.label, parent=self
+        )
+        popup.move_near(position)
+        image_path = self._image_path
+        result = popup.exec()
+        target = popup.selected_label
+        popup.deleteLater()
+        if result != QtWidgets.QDialog.DialogCode.Accepted:
+            canvas.setFocus()
+            return
+        if (
+            not self._class_name_quick_edit_active
+            or self._image_path != image_path
+            or shape not in canvas.shapes
+            or not target
+            or target == shape.label
+            or target not in choices
+            or not self.validate_label(target)
+        ):
+            canvas.setFocus()
+            return
+        shape.label = target
+        canvas.backup_shapes()
+        self._label_dialog.add_label_history(target)
+        label_list = self._docks.unique_label_list
+        if label_list.find_label_item(target) is None:
+            label_list.add_label_item(
+                target,
+                self._get_rgb_by_label(label=target, unique_label_list=label_list),
+            )
+        self._refresh_class_color(label=target)
+        self.mark_dirty()
+        canvas.update()
+        canvas.setFocus()
+
     def _toggle_bounding_box_quick_edit(self, enabled: bool) -> None:
         if enabled and self._image.isNull():
             self._bounding_box_quick_edit_action.setChecked(False)
@@ -1521,7 +1600,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self._canvas_widgets.canvas.setFocus()
 
     def _advance_bounding_box_quick_edit_image(self) -> None:
-        if self._image.isNull():
+        self._advance_quick_edit_image(self.tr("Bounding Box Shape Quick Edit"))
+
+    def _advance_quick_edit_image(self, mode_name: str) -> None:
+        if self._image.isNull() or self._image_path is None:
             return
         if self._is_changed:
             if not self.save_labels(label_path=self.current_label_file_path()):
@@ -1529,7 +1611,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.mark_clean()
         if self._docks.file_list.currentRow() + 1 >= self._docks.file_list.count():
             self.show_status_message(
-                self.tr("Bounding Box Quick Edit: reached the final image."), 5000
+                self.tr("{mode}: reached the final image.").format(mode=mode_name), 5000
             )
             return
         self._open_next_image()
@@ -1765,6 +1847,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not accepted or not label:
             return
         self._stop_quick_draw()
+        self._toggle_class_name_quick_edit(False)
         self._skeleton_drawing_label = label
         self._canvas_widgets.canvas.start_skeleton_drawing()
         self._skeleton_place_action.setChecked(True)
@@ -1917,6 +2000,7 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
         self._stop_quick_draw()
+        self._toggle_class_name_quick_edit(False)
         self._quick_skeleton_template = skeleton
         self._skeleton_drawing_label = skeleton.label
         self._canvas_widgets.canvas.start_skeleton_drawing(
@@ -3057,6 +3141,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         canvas.shape_moved.connect(self.mark_dirty)
         canvas.selection_changed.connect(self._on_shape_selection_changed)
+        canvas.class_name_requested.connect(self._quick_edit_class_name)
         canvas.drawing_polygon.connect(self._on_drawing_polygon_changed)
 
         self.setCentralWidget(scroll_area)
@@ -3245,7 +3330,10 @@ class MainWindow(QtWidgets.QMainWindow):
                     output_dir=self._output_dir,
                 )
             )
-            if saved or not self._bounding_box_quick_edit_active:
+            if saved or not (
+                self._bounding_box_quick_edit_active
+                or self._class_name_quick_edit_active
+            ):
                 return
         self._is_changed = True
         self._actions.save.setEnabled(True)
@@ -3426,6 +3514,8 @@ class MainWindow(QtWidgets.QMainWindow):
     ) -> None:
         if not keep_quick_draw:
             self._stop_quick_draw()
+        if self._class_name_quick_edit_active:
+            self._toggle_class_name_quick_edit(False)
         if self._bounding_box_quick_edit_active:
             self._toggle_bounding_box_quick_edit(False)
         if self._canvas_widgets.canvas.is_drawing_skeleton:
@@ -3538,7 +3628,7 @@ class MainWindow(QtWidgets.QMainWindow):
         canvas.set_point_color_resolver(self._get_point_colors_by_label)
         self._refresh_class_color(label=label)
 
-    def _read_class_label_documents(self) -> list[LabelDocument]:
+    def _class_label_paths(self) -> list[Path]:
         paths = [
             Path(
                 _resolve_label_path(
@@ -3549,7 +3639,15 @@ class MainWindow(QtWidgets.QMainWindow):
         ]
         if self._image_path is not None:
             paths.append(Path(self.current_label_file_path()))
-        return read_label_documents(paths)
+        return paths
+
+    def _read_class_label_documents(self) -> list[LabelDocument]:
+        return read_label_documents(self._class_label_paths())
+
+    def _refresh_label_dialog_labels(self) -> None:
+        self._label_dialog.set_dataset_labels(
+            self._label_name_index.names(self._class_label_paths())
+        )
 
     def _class_label_names(self, documents: list[LabelDocument]) -> set[str]:
         labels = {
@@ -3831,6 +3929,7 @@ class MainWindow(QtWidgets.QMainWindow):
             unique_label_list.item(i).data(Qt.ItemDataRole.UserRole)
             for i in range(unique_label_list.count())
         ]
+        existing_labels.extend(self._label_dialog.dataset_labels)
         return _is_valid_label(
             label=label, existing_labels=existing_labels, policy=policy
         )
@@ -3841,6 +3940,7 @@ class MainWindow(QtWidgets.QMainWindow):
             logger.warning("No label is selected, so cannot edit label.")
             return
 
+        self._refresh_label_dialog_labels()
         shapes = [cast(Shape, item.shape()) for item in items]
         first_shape = shapes[0]
 
@@ -3906,6 +4006,8 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
 
+        if edit_text:
+            self._label_dialog.add_label_history(text)
         self._canvas_widgets.canvas.backup_shapes()
         for item in items:
             shape = item.shape()
@@ -4242,6 +4344,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if quick_draw is not None or (is_point_mode and text):
             should_prompt = False
         if should_prompt:
+            self._refresh_label_dialog_labels()
             previous_text = self._label_dialog.edit.text()
             text, popup_flags, group_id, popup_description = self._label_dialog.popup(
                 text
@@ -4607,7 +4710,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # it; otherwise an arrow-key walk of the list ends after one keypress.
         if not self._docks.file_list.hasFocus():
             self._canvas_widgets.canvas.setFocus()
-        if self._bounding_box_quick_edit_active:
+        if self._class_name_quick_edit_active:
+            self._canvas_widgets.canvas.set_class_name_quick_edit(True)
+            self._actions.undo.setEnabled(self._canvas_widgets.canvas.can_restore_shape)
+            self._canvas_widgets.canvas.setFocus()
+        elif self._bounding_box_quick_edit_active:
             self._canvas_widgets.canvas.set_bounding_box_quick_edit(True)
             self._canvas_widgets.canvas.setFocus()
         elif self._change_label_choices is not None:
@@ -4689,6 +4796,7 @@ class MainWindow(QtWidgets.QMainWindow):
             a0.ignore()
         else:
             self._stop_quick_draw()
+            self._toggle_class_name_quick_edit(False)
         self._window_state.setValue("window/size", self.size())
         self._window_state.setValue("window/position", self.pos())
         self._window_state.setValue("window/state", self.saveState())
@@ -4885,6 +4993,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self._can_continue():
             return
         self._stop_quick_draw()
+        self._toggle_class_name_quick_edit(False)
         if self._bounding_box_quick_edit_active:
             self._toggle_bounding_box_quick_edit(False)
         self.reset_state()
@@ -5316,6 +5425,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self._zoom_rect_button.setChecked(checked)
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if (
+            self._class_name_quick_edit_active
+            and watched is self._canvas_widgets.canvas
+            and isinstance(event, QtGui.QKeyEvent)
+            and event.type()
+            in (QtCore.QEvent.Type.ShortcutOverride, QtCore.QEvent.Type.KeyPress)
+            and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Escape)
+            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+        ):
+            event.accept()
+            if event.type() == QtCore.QEvent.Type.KeyPress and not event.isAutoRepeat():
+                if event.key() == Qt.Key.Key_Space:
+                    self._advance_quick_edit_image(self.tr("Class Name Quick Edit"))
+                else:
+                    self._toggle_class_name_quick_edit(False)
+            return True
         if (
             self._quick_draw is not None
             and watched is self._canvas_widgets.canvas

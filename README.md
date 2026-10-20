@@ -318,6 +318,32 @@ labelme data_annotated/  # Open directory to annotate all images in it
 labelme data_annotated/ --labels labels.txt  # specify label list with a file
 ```
 
+### Quickly edit shape names or bounding box shapes
+
+Choose **Tools > Class Name Quick Edit**, then left-click any visible shape on
+the canvas. A searchable list of class names appears beside the cursor, including
+names from all JSON annotations in the current File List. Click a name once to
+apply it immediately to that shape. Geometry, flags, group IDs, and descriptions
+stay intact. Escape or clicking outside the picker cancels that choice.
+
+Press **Space** on the canvas to save the image and open the next one, including
+images where you made no changes. A failed save keeps the current image open.
+Press **Escape** on the canvas, or uncheck the tool, to exit the mode. Ordinary
+Undo can revert an individual name change.
+
+**Tools > Bounding Box Shape Quick Edit** is the existing two-corner-click tool
+for changing bounding box geometry. Both tools use Space to save and advance;
+switching tools exits the previous mode.
+
+### Choose labels from the whole image set
+
+**Edit Label** and the label picker for new shapes include all distinct class
+names found in JSON annotations associated with the current **File List**, even
+when those images have not been opened. Names entered through **Edit Label**
+become available immediately, alongside predefined labels and session history.
+The list refreshes when opened, including changes to JSONs or the File List,
+and uses the configured annotation directory when one is selected.
+
 ### Change a class name across images
 
 Right-click a class in **Label List** and choose **Change Class Name…**. Enter a
@@ -371,7 +397,7 @@ the annotation directory configured with **File > Change Output Dir**.
 The run stops when no eligible images remain. A failed save keeps the current
 image open; press Space to retry. Selecting another image or drawing mode also
 stops Quick Draw. Keep Previous Annotation is bypassed during the run, and
-Bounding Box Quick Edit remains a separate mode for existing boxes.
+Bounding Box Shape Quick Edit remains a separate mode for existing boxes.
 
 ### Review existing annotations with Change Labels
 
