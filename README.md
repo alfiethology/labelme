@@ -75,6 +75,8 @@ See [Animal pose annotation](docs/pose-estimation.md) for the complete workflow.
 
 ### Faster manual editing
 
+- Right-click a class in **Label List** and choose **Merge with…** to combine
+  inconsistent names across the current image set.
 - [Draw repeated objects with Quick Draw](#draw-repeated-objects-with-quick-draw)
   on randomly chosen unannotated images, with automatic saving and advance.
 - Snap new and existing polygon vertices to points in other annotations, then
@@ -315,6 +317,22 @@ cd examples/semantic_segmentation
 labelme data_annotated/  # Open directory to annotate all images in it
 labelme data_annotated/ --labels labels.txt  # specify label list with a file
 ```
+
+### Merge label names across images
+
+Right-click the label to retire in the **Label List** sidebar and choose
+**Merge with…**, then select the existing label to keep. For example, merging
+`snakes` into `snake` changes every exact `snakes` shape label to `snake` in
+the open image and all JSON annotation files associated with the current
+**File List**. Target labels can also come from images you have not opened yet.
+If you use **Change Output Dir**, the merge uses that annotation directory;
+the current image's actual JSON path is included when it was saved elsewhere.
+
+The JSON changes save immediately. Geometry, flags, group IDs, image data, and
+other metadata remain intact; unrelated unsaved edits on the current image stay
+unsaved. The retired name disappears from Label List, label suggestions, and
+editable predefined-label settings. Undoing a geometry edit does not bring it
+back. Cancel the label picker to leave everything unchanged.
 
 ### Draw repeated objects with Quick Draw
 

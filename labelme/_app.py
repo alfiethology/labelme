@@ -53,6 +53,10 @@ from ._label_file import read_image_file
 from ._label_file import read_label_file
 from ._label_file import write_label_file
 from ._label_flags import compile_label_flags
+from ._label_merge import LabelMergeError
+from ._label_merge import prepare_label_changes
+from ._label_merge import read_label_documents
+from ._label_merge import write_label_changes
 from ._pose import SkeletonTemplate
 from ._pose import ensure_skeleton_axis_aligned_bbox
 from ._pose import make_skeleton_shape
@@ -3498,9 +3502,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         menu = QtWidgets.QMenu(self)
         change_color = menu.addAction(self.tr("Change Class Color…"))
+        merge = menu.addAction(self.tr("Merge with…"))
         picked = menu.exec(
             self._docks.unique_label_list.mapToGlobal(point)  # ty: ignore[invalid-argument-type]
         )
+        if picked == merge:
+            self._merge_label(label)
+            return
         if picked != change_color:
             return
         canvas = self._canvas_widgets.canvas
@@ -3523,6 +3531,147 @@ class MainWindow(QtWidgets.QMainWindow):
         self._set_setting_value(key_path, colors)
         canvas.set_point_color_resolver(self._get_point_colors_by_label)
         self._refresh_class_color(label=label)
+
+    def _merge_label(self, source: str) -> None:
+        paths = [
+            Path(
+                _resolve_label_path(
+                    image_or_label_path=path, output_dir=self._output_dir
+                )
+            )
+            for path in self.image_list
+        ]
+        if self._image_path is not None:
+            paths.append(Path(self.current_label_file_path()))
+        try:
+            documents = read_label_documents(paths)
+        except LabelMergeError as error:
+            self.show_error_message(self.tr("Could not merge labels"), str(error))
+            return
+        labels = {
+            self._docks.unique_label_list.item(row).data(Qt.ItemDataRole.UserRole)
+            for row in range(self._docks.unique_label_list.count())
+        }
+        labels.update(
+            shape["label"]
+            for document in documents
+            for shape in document.data["shapes"]
+        )
+        choices = sorted(
+            label for label in labels if isinstance(label, str) and label != source
+        )
+        if not choices:
+            self.show_status_message(
+                self.tr("There is no other label to merge with."), 5000
+            )
+            return
+        target, accepted = QtWidgets.QInputDialog.getItem(
+            self,
+            self.tr("Merge Labels"),
+            self.tr(
+                'Merge "{source}" into:\n'
+                "Updates and saves matching labels in every JSON "
+                "in the current File List.\n"
+                "Other unsaved changes on the open image remain unsaved."
+            ).format(source=source),
+            choices,
+            0,
+            False,
+        )
+        if not accepted or target not in choices:
+            return
+        predefined = self._config["labels"]
+        merged_predefined = (
+            list(
+                dict.fromkeys(
+                    target if label == source else label for label in predefined
+                )
+            )
+            if predefined is not None
+            else None
+        )
+        try:
+            changes = prepare_label_changes(documents, source, target)
+            with write_label_changes(changes):
+                if merged_predefined != predefined and self._is_settings_editable:
+                    assert self._config_file is not None
+                    _config.set_overrides(
+                        config_file=self._config_file,
+                        overrides=[(("labels",), merged_predefined)],
+                    )
+        except (LabelMergeError, ValueError) as error:
+            self.show_error_message(self.tr("Could not merge labels"), str(error))
+            return
+
+        self._stop_quick_draw()
+        canvas = self._canvas_widgets.canvas
+        current_changed = any(shape.label == source for shape in canvas.shapes)
+        for shapes in [canvas.shapes, *canvas.shape_backups]:
+            for shape in shapes:
+                if shape.label == source:
+                    shape.label = target
+        if self._annotation is not None:
+            for shape in self._annotation.shapes:
+                if shape["label"] == source:
+                    shape["label"] = target
+        clipboard = self._shape_clipboard.paste()
+        for shape in clipboard:
+            if shape.label == source:
+                shape.label = target
+        self._shape_clipboard.store(clipboard)
+        if self._point_mode_label_state and self._point_mode_label_state[0] == source:
+            _, flags, group_id, description = self._point_mode_label_state
+            self._point_mode_label_state = (target, flags, group_id, description)
+        if self._change_label_choices is not None:
+            self._change_label_choices = {
+                key: target if label == source else label
+                for key, label in self._change_label_choices.items()
+            }
+        self._set_setting_value(("labels",), merged_predefined)
+        old_dialog = self._label_dialog
+        history = list(
+            dict.fromkeys(
+                target if label == source else label
+                for label in old_dialog.label_history
+            )
+        )
+        if target not in history:
+            history.append(target)
+        self._label_dialog = self._make_label_dialog(label_history=history)
+        if old_dialog.edit.text():
+            text = old_dialog.edit.text()
+            self._label_dialog.edit.setText(target if text == source else text)
+        old_dialog.deleteLater()
+        self._sync_setting_controls(("labels",))
+        label_list = self._docks.unique_label_list
+        with QtCore.QSignalBlocker(label_list):
+            item = label_list.find_label_item(source)
+            if item is not None:
+                label_list.takeItem(label_list.row(item))
+            if label_list.find_label_item(target) is None:
+                label_list.add_label_item(
+                    target,
+                    self._get_rgb_by_label(label=target, unique_label_list=label_list),
+                )
+        # Removing a class shifts auto-assigned colours for subsequent classes.
+        for row in range(label_list.count()):
+            label = label_list.item(row).data(Qt.ItemDataRole.UserRole)
+            if isinstance(label, str):
+                self._refresh_class_color(label=label)
+        target_item = label_list.find_label_item(target)
+        assert target_item is not None
+        label_list.setCurrentItem(target_item)
+        self._on_unique_label_item_changed(target_item)
+        if current_changed and self._label_file_path is None:
+            self._is_changed = True
+            self._actions.save.setEnabled(True)
+            self.setWindowTitle(self._get_window_title(dirty=True))
+        self.show_status_message(
+            self.tr(
+                'Merged "{source}" into "{target}" in {count} JSON file(s).'
+            ).format(source=source, target=target, count=len(changes)),
+            10000,
+        )
 
     def _draft_palette_from_config(self) -> Palette:
         return Palette(
