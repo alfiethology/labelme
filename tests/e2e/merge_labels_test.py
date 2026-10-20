@@ -16,6 +16,7 @@ from labelme import _config
 from labelme import _label_merge
 from labelme._app import MainWindow
 from labelme._shape import Shape
+from labelme._widgets.class_name_dialog import ClassNameDialog
 from labelme._yaml import safe_load
 
 from .conftest import MainWinFactory
@@ -139,7 +140,7 @@ def test_context_menu_merges_open_and_unopened_images_and_removes_source(
     with monkeypatch.context() as patch:
         patch.setattr(QtWidgets, "QMenu", Menu)
         win.show_unique_label_list_menu(label_list.visualItemRect(item).center())
-    assert menu_items == ["Change Class Color…", "Merge with…"]
+    assert menu_items == ["Change Class Color…", "Change Class Name…", "Merge with…"]
     assert offered == [["snake"]]
     assert label_list.find_label_item("snakes") is None
     assert label_list.find_label_item("snake") is not None
@@ -422,3 +423,222 @@ def test_target_keeps_its_custom_colours_and_visibility(
     assert all(shape.visible == visible for shape in canvas.shapes)
     assert labels.currentItem() == target
     assert not win._is_changed
+
+
+def _enter_class_name(
+    monkeypatch: pytest.MonkeyPatch, name: str = "reptile", *, cancel: bool = False
+) -> None:
+    def edit(dialog: ClassNameDialog) -> int:
+        assert dialog.name_edit.text() == "snakes"
+        dialog.name_edit.setText(name)
+        if cancel:
+            dialog.reject()
+        else:
+            dialog.accept()
+        return dialog.result()
+
+    monkeypatch.setattr(ClassNameDialog, "exec", edit)
+
+
+def test_class_name_context_action_updates_all_jsons_and_preserves_data(
+    merge_win: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win = merge_win
+    originals = {
+        path: json.loads(path.read_bytes())
+        for path in (tmp_path / "images").glob("*.json")
+    }
+    _enter_class_name(monkeypatch)
+    palette = win._canvas_widgets.canvas._resolve_palette("snakes")
+
+    class Menu:
+        def __init__(self, parent: QtWidgets.QWidget) -> None:
+            self.parent = parent
+            self.rename: QtGui.QAction | None = None
+
+        def addAction(self, text: str) -> QtGui.QAction:
+            action = QtGui.QAction(text, self.parent)
+            if text == "Change Class Name…":
+                self.rename = action
+            return action
+
+        def exec(self, *args: object) -> QtGui.QAction:
+            assert self.rename is not None
+            return self.rename
+
+    labels = win._docks.unique_label_list
+    source = labels.find_label_item("snakes")
+    assert source is not None
+    with monkeypatch.context() as patch:
+        patch.setattr(QtWidgets, "QMenu", Menu)
+        win.show_unique_label_list_menu(labels.visualItemRect(source).center())
+    assert labels.find_label_item("snakes") is None
+    assert labels.find_label_item("reptile") is source
+    assert win._canvas_widgets.canvas._resolve_palette("reptile") == palette
+    assert all(shape.label == "reptile" for shape in win._canvas_widgets.canvas.shapes)
+    assert "snakes" not in win._label_dialog.label_history
+    assert not win._label_dialog.label_list.findItems(
+        "snakes", Qt.MatchFlag.MatchExactly
+    )
+    assert not win._is_changed
+    for path, data in originals.items():
+        for shape in data["shapes"]:
+            if shape["label"] == "snakes":
+                shape["label"] = "reptile"
+        assert json.loads(path.read_bytes()) == data
+    assert not (tmp_path / "images/c.json").exists()
+
+
+@pytest.mark.parametrize("name", ["snakes", "  ", "snake", "reptile"])
+def test_cancel_or_invalid_class_name_leaves_files_unchanged(
+    merge_win: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    originals = {
+        path: path.read_bytes() for path in (tmp_path / "images").glob("*.json")
+    }
+    # "snake" exists only in the unopened image and must still be rejected.
+    _enter_class_name(monkeypatch, name, cancel=name == "reptile")
+    merge_win._change_class_name("snakes")
+    assert all(path.read_bytes() == content for path, content in originals.items())
+    assert merge_win._docks.unique_label_list.find_label_item("snakes") is not None
+    assert all(
+        shape.label == "snakes" for shape in merge_win._canvas_widgets.canvas.shapes
+    )
+
+
+def test_rename_keeps_pending_edits_and_updates_undo_and_point_cache(
+    merge_win: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    win = merge_win
+    _enter_class_name(monkeypatch)
+    canvas = win._canvas_widgets.canvas
+    win._shape_clipboard.store(canvas.shapes)
+    win._point_mode_label_state = ("snakes", {"occluded": True}, 4, "description")
+    canvas.shapes[0].points[0] = [15, 16]
+    win._insert_shapes(
+        [Shape(label="snakes", shape_type="point", points=np.array([[70, 80]]))]
+    )
+    win._change_class_name("snakes")
+    assert win._is_changed
+    assert len(canvas.shapes) == 3
+    assert all(shape.label == "reptile" for shape in canvas.shapes)
+    np.testing.assert_array_equal(canvas.shapes[0].points[0], [15, 16])
+    saved = json.loads((tmp_path / "images/a.json").read_bytes())
+    assert len(saved["shapes"]) == 2
+    assert saved["shapes"][0]["points"][0] == [10, 10]
+    assert win._point_mode_label_state == (
+        "reptile",
+        {"occluded": True},
+        4,
+        "description",
+    )
+    assert all(shape.label == "reptile" for shape in win._shape_clipboard.paste())
+    win.undo_shape_edit()
+    assert all(shape.label == "reptile" for shape in canvas.shapes)
+    assert win._docks.unique_label_list.find_label_item("snakes") is None
+    win.mark_clean()
+
+
+@pytest.mark.parametrize("write_error", [False, True])
+def test_renamed_colours_and_predefined_names_persist_or_roll_back(
+    main_win: MainWinFactory,
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    write_error: bool,
+) -> None:
+    paths = _dataset(tmp_path)
+    originals = {path: path.read_bytes() for path in paths}
+    config = tmp_path / "labelmerc.yaml"
+    original_config = (
+        "auto_save: false\nlabels: [snakes, snake]\n"
+        "shape:\n  point_colors_by_label:\n    snakes:\n"
+        "      inner: [12, 34, 56]\n      outer: [210, 220, 230]\n"
+        "shape_color:\n  mode: by_label\n  by_label:\n"
+        "    colors:\n      snakes: [12, 34, 56]\n"
+    )
+    config.write_text(original_config)
+    win = main_win(file_or_dir=tmp_path / "images", config_file=config)
+    show_window_and_wait_for_imagedata(qtbot, win)
+    _enter_class_name(monkeypatch)
+    source = win._docks.unique_label_list.find_label_item("snakes")
+    assert source is not None
+    source.setCheckState(Qt.CheckState.Unchecked)
+    expected_palette = win._canvas_widgets.canvas._resolve_palette("snakes")
+    errors: list[str] = []
+    monkeypatch.setattr(
+        win, "show_error_message", lambda title, message: errors.append(message)
+    )
+    if write_error:
+
+        def fail_config(*args: object, **kwargs: object) -> None:
+            raise OSError("cannot save settings")
+
+        monkeypatch.setattr(_config, "set_overrides", fail_config)
+    win._change_class_name("snakes")
+    if write_error:
+        assert errors and "cannot save settings" in errors[0]
+        assert all(path.read_bytes() == content for path, content in originals.items())
+        assert config.read_text() == original_config
+        assert source.data(Qt.ItemDataRole.UserRole) == "snakes"
+        return
+    assert not errors
+    assert source.data(Qt.ItemDataRole.UserRole) == "reptile"
+    assert all(not shape.visible for shape in win._canvas_widgets.canvas.shapes)
+    updated = safe_load(config.read_text())
+    assert updated["labels"] == ["reptile", "snake"]
+    assert updated["shape"]["point_colors_by_label"] == {
+        "reptile": {"inner": [12, 34, 56], "outer": [210, 220, 230]}
+    }
+    assert updated["shape_color"]["by_label"]["colors"] == {"reptile": [12, 34, 56]}
+    assert win._canvas_widgets.canvas._resolve_palette("reptile") == expected_palette
+    win.close()
+    reopened = main_win(file_or_dir=tmp_path / "images", config_file=config)
+    assert reopened._docks.unique_label_list.find_label_item("snakes") is None
+    assert (
+        reopened._canvas_widgets.canvas._resolve_palette("reptile") == expected_palette
+    )
+
+
+def test_rename_write_failure_restores_files_and_original_name(
+    merge_win: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    originals = {
+        path: path.read_bytes() for path in (tmp_path / "images").glob("*.json")
+    }
+    _enter_class_name(monkeypatch)
+    replace = _label_merge._replace_file
+
+    def fail_second(path: Path, content: bytes) -> None:
+        if path.name == "b.json":
+            raise PermissionError("read only")
+        replace(path, content)
+
+    errors: list[str] = []
+    monkeypatch.setattr(_label_merge, "_replace_file", fail_second)
+    monkeypatch.setattr(
+        merge_win, "show_error_message", lambda title, message: errors.append(message)
+    )
+    merge_win._change_class_name("snakes")
+    assert errors and "read only" in errors[0]
+    assert all(path.read_bytes() == content for path, content in originals.items())
+    assert merge_win._docks.unique_label_list.find_label_item("snakes") is not None
+
+
+def test_rename_uses_configured_output_directory(
+    main_win: MainWinFactory,
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _dataset(tmp_path, tmp_path / "labels")
+    win = main_win(file_or_dir=tmp_path / "images", output_dir=tmp_path / "labels")
+    show_window_and_wait_for_imagedata(qtbot, win)
+    _enter_class_name(monkeypatch)
+    win._change_class_name("snakes")
+    for path in paths:
+        assert all(
+            shape["label"] != "snakes"
+            for shape in json.loads(path.read_bytes())["shapes"]
+        )
+    assert not (tmp_path / "images/a.json").exists()

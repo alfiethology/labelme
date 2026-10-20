@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Label List > Change Class Name… with a clear warning that renaming updates all instances in all JSONs in the current File List; class colours, visibility, metadata, and unrelated unsaved edits are preserved.
 - Added Label List > Merge with… to merge an exact class name into another across the current File List's JSON annotations and the open image, removing the retired name from the sidebar and label suggestions while preserving other annotation data and unsaved edits.
 - Added Tools > Quick Draw for drawing an ordered set of named bounding boxes on random unannotated images, automatically saving and advancing when complete; Space saves partial annotations or skips empty images, and Escape exits.
 - Added a Ctrl+P command palette for searching menu commands, tools, and settings, with keyboard navigation, shortcut hints, current toggle states, and direct access to setting controls.

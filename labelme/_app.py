@@ -53,6 +53,7 @@ from ._label_file import read_image_file
 from ._label_file import read_label_file
 from ._label_file import write_label_file
 from ._label_flags import compile_label_flags
+from ._label_merge import LabelDocument
 from ._label_merge import LabelMergeError
 from ._label_merge import prepare_label_changes
 from ._label_merge import read_label_documents
@@ -89,6 +90,7 @@ from ._widgets import format_shape_label
 from ._widgets import read_label_shortcuts
 from ._widgets._shape_render import SKELETON_NODE_LABEL_FONT_SIZE
 from ._widgets.class_color_dialog import ClassColorDialog
+from ._widgets.class_name_dialog import ClassNameDialog
 from ._widgets.command_palette import Command
 from ._widgets.command_palette import CommandPalette
 from ._widgets.command_palette import collect_action_commands
@@ -3502,10 +3504,14 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         menu = QtWidgets.QMenu(self)
         change_color = menu.addAction(self.tr("Change Class Color…"))
+        change_name = menu.addAction(self.tr("Change Class Name…"))
         merge = menu.addAction(self.tr("Merge with…"))
         picked = menu.exec(
             self._docks.unique_label_list.mapToGlobal(point)  # ty: ignore[invalid-argument-type]
         )
+        if picked == change_name:
+            self._change_class_name(label)
+            return
         if picked == merge:
             self._merge_label(label)
             return
@@ -3532,7 +3538,7 @@ class MainWindow(QtWidgets.QMainWindow):
         canvas.set_point_color_resolver(self._get_point_colors_by_label)
         self._refresh_class_color(label=label)
 
-    def _merge_label(self, source: str) -> None:
+    def _read_class_label_documents(self) -> list[LabelDocument]:
         paths = [
             Path(
                 _resolve_label_path(
@@ -3543,11 +3549,9 @@ class MainWindow(QtWidgets.QMainWindow):
         ]
         if self._image_path is not None:
             paths.append(Path(self.current_label_file_path()))
-        try:
-            documents = read_label_documents(paths)
-        except LabelMergeError as error:
-            self.show_error_message(self.tr("Could not merge labels"), str(error))
-            return
+        return read_label_documents(paths)
+
+    def _class_label_names(self, documents: list[LabelDocument]) -> set[str]:
         labels = {
             self._docks.unique_label_list.item(row).data(Qt.ItemDataRole.UserRole)
             for row in range(self._docks.unique_label_list.count())
@@ -3557,6 +3561,36 @@ class MainWindow(QtWidgets.QMainWindow):
             for document in documents
             for shape in document.data["shapes"]
         )
+        return {label for label in labels if isinstance(label, str)}
+
+    def _change_class_name(self, source: str) -> None:
+        try:
+            documents = self._read_class_label_documents()
+        except LabelMergeError as error:
+            self.show_error_message(self.tr("Could not change class name"), str(error))
+            return
+        labels = self._class_label_names(documents)
+        dialog = ClassNameDialog(label=source, existing_labels=labels, parent=self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        target = dialog.new_name()
+        if not target or target == source:
+            return
+        if target in labels:
+            self.show_error_message(
+                self.tr("Could not change class name"),
+                self.tr("That class name already exists. Use Merge with… instead."),
+            )
+            return
+        self._replace_class_label(source, target, documents, rename=True)
+
+    def _merge_label(self, source: str) -> None:
+        try:
+            documents = self._read_class_label_documents()
+        except LabelMergeError as error:
+            self.show_error_message(self.tr("Could not merge labels"), str(error))
+            return
+        labels = self._class_label_names(documents)
         choices = sorted(
             label for label in labels if isinstance(label, str) and label != source
         )
@@ -3580,6 +3614,16 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         if not accepted or target not in choices:
             return
+        self._replace_class_label(source, target, documents)
+
+    def _replace_class_label(
+        self,
+        source: str,
+        target: str,
+        documents: list[LabelDocument],
+        *,
+        rename: bool = False,
+    ) -> None:
         predefined = self._config["labels"]
         merged_predefined = (
             list(
@@ -3590,17 +3634,36 @@ class MainWindow(QtWidgets.QMainWindow):
             if predefined is not None
             else None
         )
+        overrides: list[tuple[tuple[str, ...], object]] = []
+        if merged_predefined != predefined:
+            overrides.append((("labels",), merged_predefined))
+        if rename:
+            # Explicit colours follow a renamed class. Merging keeps the target's.
+            for key_path in (
+                ("shape", "point_colors_by_label"),
+                ("shape_color", "by_label", "colors"),
+            ):
+                colors = self._read_setting_value(key_path)
+                if isinstance(colors, dict) and source in colors:
+                    renamed_colors = dict(colors)
+                    renamed_colors[target] = renamed_colors.pop(source)
+                    overrides.append((key_path, renamed_colors))
         try:
             changes = prepare_label_changes(documents, source, target)
             with write_label_changes(changes):
-                if merged_predefined != predefined and self._is_settings_editable:
+                if overrides and self._is_settings_editable:
                     assert self._config_file is not None
                     _config.set_overrides(
                         config_file=self._config_file,
-                        overrides=[(("labels",), merged_predefined)],
+                        overrides=overrides,
                     )
         except (LabelMergeError, ValueError) as error:
-            self.show_error_message(self.tr("Could not merge labels"), str(error))
+            title = (
+                self.tr("Could not change class name")
+                if rename
+                else self.tr("Could not merge labels")
+            )
+            self.show_error_message(title, str(error))
             return
 
         self._stop_quick_draw()
@@ -3627,7 +3690,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 key: target if label == source else label
                 for key, label in self._change_label_choices.items()
             }
-        self._set_setting_value(("labels",), merged_predefined)
+        for key_path, value in overrides:
+            self._set_setting_value(key_path, value)
         old_dialog = self._label_dialog
         history = list(
             dict.fromkeys(
@@ -3642,17 +3706,21 @@ class MainWindow(QtWidgets.QMainWindow):
             text = old_dialog.edit.text()
             self._label_dialog.edit.setText(target if text == source else text)
         old_dialog.deleteLater()
-        self._sync_setting_controls(("labels",))
         label_list = self._docks.unique_label_list
         with QtCore.QSignalBlocker(label_list):
             item = label_list.find_label_item(source)
-            if item is not None:
+            if item is not None and rename:
+                # Keep its list position (automatic colour) and visibility.
+                item.setData(Qt.ItemDataRole.UserRole, target)
+                item.setText(target)
+            elif item is not None:
                 label_list.takeItem(label_list.row(item))
             if label_list.find_label_item(target) is None:
                 label_list.add_label_item(
                     target,
                     self._get_rgb_by_label(label=target, unique_label_list=label_list),
                 )
+        self._sync_setting_controls(("labels",))
         # Removing a class shifts auto-assigned colours for subsequent classes.
         for row in range(label_list.count()):
             label = label_list.item(row).data(Qt.ItemDataRole.UserRole)
@@ -3666,10 +3734,16 @@ class MainWindow(QtWidgets.QMainWindow):
             self._is_changed = True
             self._actions.save.setEnabled(True)
             self.setWindowTitle(self._get_window_title(dirty=True))
-        self.show_status_message(
+        message = (
             self.tr(
-                'Merged "{source}" into "{target}" in {count} JSON file(s).'
-            ).format(source=source, target=target, count=len(changes)),
+                'Changed class name from "{source}" to "{target}" '
+                "in {count} JSON file(s)."
+            )
+            if rename
+            else self.tr('Merged "{source}" into "{target}" in {count} JSON file(s).')
+        )
+        self.show_status_message(
+            message.format(source=source, target=target, count=len(changes)),
             10000,
         )
 

@@ -318,6 +318,19 @@ labelme data_annotated/  # Open directory to annotate all images in it
 labelme data_annotated/ --labels labels.txt  # specify label list with a file
 ```
 
+### Change a class name across images
+
+Right-click a class in **Label List** and choose **Change Class Name…**. Enter a
+new name and click **Rename**. The note beneath the name field explains that
+this changes all instances of that class in all JSON files in the current
+**File List**, saving those JSON updates immediately. Cancel leaves everything
+unchanged.
+
+The open annotations, label suggestions, and editable predefined-label settings
+use the new name too. The class keeps its colours and visibility, and unrelated
+unsaved edits stay unsaved. If the name already belongs to another class,
+use **Merge with…** instead.
+
 ### Merge label names across images
 
 Right-click the label to retire in the **Label List** sidebar and choose

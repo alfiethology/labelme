@@ -46,7 +46,7 @@ def test_class_menu_selects_both_point_colours_and_persists_them(
             self.parent = parent
 
         def addAction(self, text: str) -> QtGui.QAction:
-            assert text in ("Change Class Color…", "Merge with…")
+            assert text in ("Change Class Color…", "Change Class Name…", "Merge with…")
             action = QtGui.QAction(text, self.parent)
             if text == "Change Class Color…":
                 self.action = action
