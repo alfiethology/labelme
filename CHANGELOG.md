@@ -46,6 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed the Label List sidebar showing only classes from visited images: it now discovers every class in the current File List's JSON annotations when a directory opens, while preserving existing class colours and visibility choices.
 - Fixed saved point-colour settings from another fork branch causing the entire configuration to be rejected and menu preferences to stop saving; unavailable colour settings are ignored in memory and preserved in the config file.
 - Fixed Snap to Existing Points, Lock Cursor to Pixels, Fill Editing Shapes, Show Center Dots, and Zoom Speed resetting after restarting Labelme; changes now save immediately and remain synchronized with Settings.
 - Fixed points and rectangle edges appearing half a pixel above and to the left of the drawing cursor by matching cursor and canvas stroke rasterization.

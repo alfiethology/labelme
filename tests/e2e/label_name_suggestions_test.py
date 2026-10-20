@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 from PySide6 import QtWidgets
+from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
 from labelme._app import MainWindow
@@ -91,6 +92,98 @@ def _names(win: MainWindow) -> list[str]:
     return [labels.item(row).text() for row in range(labels.count())]
 
 
+def test_sidebar_contains_all_classes_as_soon_as_directory_opens(
+    name_win: MainWindow,
+) -> None:
+    sidebar = name_win._docks.unique_label_list
+    names = [
+        sidebar.item(row).data(Qt.ItemDataRole.UserRole)
+        for row in range(sidebar.count())
+    ]
+    assert set(names) == {"old", "predefined", "unopened", "another class"}
+    assert len(names) == len(set(names))
+    assert (
+        name_win._image_path is not None and Path(name_win._image_path).name == "a.png"
+    )
+    assert len(name_win._canvas_widgets.canvas.shapes) == 1
+    assert "unopened" not in name_win._label_dialog.label_history
+    assert not name_win._is_changed
+
+
+def test_directory_without_predefined_labels_shows_all_json_classes(
+    main_win: MainWinFactory, tmp_path: Path, qtbot: QtBot
+) -> None:
+    for name, label in (("a", "snake"), ("b", "snakes")):
+        image = tmp_path / f"{name}.png"
+        Image.new("RGB", (100, 100)).save(image)
+        _write(image.with_suffix(".json"), image, [label])
+    win = main_win(file_or_dir=tmp_path, config_overrides={"auto_save": False})
+    show_window_and_wait_for_imagedata(qtbot, win)
+    sidebar = win._docks.unique_label_list
+    assert sidebar.count() == 2
+    assert sidebar.find_label_item("snake") is not None
+    assert sidebar.find_label_item("snakes") is not None
+    assert win._image_path is not None and Path(win._image_path).name == "a.png"
+    assert not win._is_changed
+
+
+def test_unopened_class_visibility_and_colour_survive_image_navigation(
+    name_win: MainWindow,
+) -> None:
+    win = name_win
+    sidebar = win._docks.unique_label_list
+    item = sidebar.find_label_item("unopened")
+    assert item is not None
+    palette = win._canvas_widgets.canvas._resolve_palette("unopened")
+    item.setCheckState(Qt.CheckState.Unchecked)
+    for row in (1, 0, 1):
+        win._docks.file_list.setCurrentRow(row)
+        assert sidebar.find_label_item("unopened") is item
+        assert item.checkState() == Qt.CheckState.Unchecked
+        assert win._canvas_widgets.canvas._resolve_palette("unopened") == palette
+        assert all(
+            not shape.visible
+            for shape in win._canvas_widgets.canvas.shapes
+            if shape.label == "unopened"
+        )
+    assert not win._is_changed
+
+
+def test_new_json_classes_are_added_before_that_image_is_opened(
+    name_win: MainWindow, tmp_path: Path
+) -> None:
+    images = tmp_path / "images"
+    _write(images / "c.json", images / "c.png", ["new external class"])
+    name_win._docks.file_list.setCurrentRow(1)
+    assert (
+        name_win._image_path is not None and Path(name_win._image_path).name == "b.png"
+    )
+    assert (
+        name_win._docks.unique_label_list.find_label_item("new external class")
+        is not None
+    )
+    assert all(
+        shape.label != "new external class"
+        for shape in name_win._canvas_widgets.canvas.shapes
+    )
+    assert not name_win._is_changed
+
+
+def test_dropped_image_classes_are_added_to_sidebar(
+    name_win: MainWindow, tmp_path: Path
+) -> None:
+    folder = tmp_path / "dropped"
+    folder.mkdir()
+    image = folder / "new.png"
+    Image.new("RGB", (100, 100)).save(image)
+    _write(image.with_suffix(".json"), image, ["dropped class"])
+    name_win.import_dropped_image_files([str(image)])
+    assert (
+        name_win._docks.unique_label_list.find_label_item("dropped class") is not None
+    )
+    assert not name_win._is_changed
+
+
 def _edit_names(
     win: MainWindow, monkeypatch: pytest.MonkeyPatch, target: str | None = None
 ) -> list[str]:
@@ -118,7 +211,7 @@ def test_edit_label_offers_unopened_json_names_without_loading_or_drawing(
     names = _edit_names(win, monkeypatch)
     assert names == ["another class", "old", "predefined", "unopened"]
     assert win._image_path == original_path
-    assert win._docks.unique_label_list.find_label_item("unopened") is None
+    assert win._docks.unique_label_list.find_label_item("unopened") is not None
     assert len(win._canvas_widgets.canvas.shapes) == 1
     assert not win._is_changed
     assert all(path.read_bytes() == content for path, content in originals.items())
@@ -187,6 +280,10 @@ def test_suggestions_use_output_directory_and_manual_current_json(
     names = _edit_names(win, monkeypatch)
     assert "unopened" in names and "manual location" in names
     assert "outside selected output" not in names
+    sidebar = win._docks.unique_label_list
+    assert sidebar.find_label_item("unopened") is not None
+    assert sidebar.find_label_item("manual location") is not None
+    assert sidebar.find_label_item("outside selected output") is None
 
 
 def test_exact_validation_accepts_existing_dataset_class(

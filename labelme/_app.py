@@ -1544,7 +1544,7 @@ class MainWindow(QtWidgets.QMainWindow):
             or not shape.label
         ):
             return
-        self._refresh_label_dialog_labels()
+        self._refresh_class_labels()
         labels = self._label_dialog.label_list
         choices = [labels.item(row).text() for row in range(labels.count())]
         popup = ClassNameQuickEditPopup(
@@ -3644,10 +3644,19 @@ class MainWindow(QtWidgets.QMainWindow):
     def _read_class_label_documents(self) -> list[LabelDocument]:
         return read_label_documents(self._class_label_paths())
 
-    def _refresh_label_dialog_labels(self) -> None:
-        self._label_dialog.set_dataset_labels(
-            self._label_name_index.names(self._class_label_paths())
-        )
+    def _refresh_class_labels(self) -> None:
+        names = self._label_name_index.names(self._class_label_paths())
+        self._label_dialog.set_dataset_labels(names)
+        label_list = self._docks.unique_label_list
+        with QtCore.QSignalBlocker(label_list):
+            for name in names:
+                if label_list.find_label_item(name) is None:
+                    label_list.add_label_item(
+                        name,
+                        self._get_rgb_by_label(
+                            label=name, unique_label_list=label_list
+                        ),
+                    )
 
     def _class_label_names(self, documents: list[LabelDocument]) -> set[str]:
         labels = {
@@ -3940,7 +3949,7 @@ class MainWindow(QtWidgets.QMainWindow):
             logger.warning("No label is selected, so cannot edit label.")
             return
 
-        self._refresh_label_dialog_labels()
+        self._refresh_class_labels()
         shapes = [cast(Shape, item.shape()) for item in items]
         first_shape = shapes[0]
 
@@ -4344,7 +4353,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if quick_draw is not None or (is_point_mode and text):
             should_prompt = False
         if should_prompt:
-            self._refresh_label_dialog_labels()
+            self._refresh_class_labels()
             previous_text = self._label_dialog.edit.text()
             text, popup_flags, group_id, popup_description = self._label_dialog.popup(
                 text
@@ -4688,6 +4697,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.mark_dirty()
         else:
             self.mark_clean()
+        self._refresh_class_labels()
         self._canvas_widgets.canvas.setEnabled(True)
         # set zoom values
         is_initial_load = not self._zoom_values
@@ -5701,6 +5711,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._actions.open_next_img.setEnabled(True)
             self._actions.open_prev_img.setEnabled(True)
 
+        self._refresh_class_labels()
         self._open_next_image()
 
     def _import_images_from_dir(
@@ -5741,6 +5752,8 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 item.setCheckState(Qt.CheckState.Unchecked)
             self._docks.file_list.addItem(item)
+
+        self._refresh_class_labels()
 
     def _update_status_stats(self, mouse_pos: QtCore.QPointF) -> None:
         stats: list[str] = []

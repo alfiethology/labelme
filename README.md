@@ -337,6 +337,10 @@ switching tools exits the previous mode.
 
 ### Choose labels from the whole image set
 
+The **Label List** sidebar includes every distinct class from the current
+**File List** as soon as a directory opens, including classes found only in
+unopened images. Its visibility checkboxes retain their states between images.
+
 **Edit Label** and the label picker for new shapes include all distinct class
 names found in JSON annotations associated with the current **File List**, even
 when those images have not been opened. Names entered through **Edit Label**

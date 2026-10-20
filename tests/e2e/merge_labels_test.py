@@ -114,7 +114,7 @@ def test_context_menu_merges_open_and_unopened_images_and_removes_source(
     win = merge_win
     paths = sorted((tmp_path / "images").glob("*.json"))
     originals = {path: json.loads(path.read_bytes()) for path in paths}
-    assert win._docks.unique_label_list.find_label_item("snake") is None
+    assert win._docks.unique_label_list.find_label_item("snake") is not None
     offered = _choose_target(monkeypatch)
     menu_items: list[str] = []
 
@@ -412,7 +412,6 @@ def test_target_keeps_its_custom_colours_and_visibility(
     canvas = win._canvas_widgets.canvas
     expected = canvas._resolve_palette("snake")
     labels = win._docks.unique_label_list
-    labels.add_label_item("snake", (12, 34, 56))
     target = labels.find_label_item("snake")
     source = labels.find_label_item("snakes")
     assert target is not None and source is not None
