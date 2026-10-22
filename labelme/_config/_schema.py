@@ -217,6 +217,14 @@ SETTINGS: Final[tuple[Setting, ...]] = (
         group="Drawing and canvas",
         label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Point inner colour")),
         kind="color",
+        note=cast(
+            str,
+            QT_TRANSLATE_NOOP(
+                "SettingsDialog",
+                "Used while drawing. Labeled shapes use their label colour; "
+                "use Change Class Color to customise it.",
+            ),
+        ),
     ),
     Setting(
         key_path=("shape", "vertex_outline_color"),

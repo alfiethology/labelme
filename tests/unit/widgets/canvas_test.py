@@ -47,7 +47,7 @@ def canvas(qtbot: QtBot) -> Canvas:
     return canvas
 
 
-def test_point_colours_are_independent_of_class_colours(canvas: Canvas) -> None:
+def test_points_follow_label_colours_and_keep_the_global_ring(canvas: Canvas) -> None:
     canvas.set_color_resolver(
         lambda label: (255, 0, 0) if label == "a" else (0, 0, 255)
     )
@@ -61,8 +61,9 @@ def test_point_colours_are_independent_of_class_colours(canvas: Canvas) -> None:
     assert first.line == QtGui.QColor(255, 0, 0)
     assert second.line == QtGui.QColor(0, 0, 255)
     for palette in (first, second):
-        assert palette.vertex_fill == point_palette.vertex_fill
+        assert palette.vertex_fill == palette.line
         assert palette.vertex_outline == point_palette.vertex_outline
+    assert canvas._resolve_palette(None) == point_palette
 
 
 @pytest.mark.gui

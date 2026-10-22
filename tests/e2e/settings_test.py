@@ -73,9 +73,9 @@ def test_point_colours_apply_to_drafts_and_existing_shapes_and_persist(
         assert isinstance(button, _ColorButton)
         button.click()
     palette = canvas._render_context(shape, highlighted=False).palette
-    assert palette.vertex_fill.getRgb() == (12, 34, 56, 255)
+    assert palette.vertex_fill == palette.line
     assert palette.vertex_outline.getRgb() == (210, 220, 230, 255)
-    assert canvas._draft_palette.vertex_fill == palette.vertex_fill
+    assert canvas._draft_palette.vertex_fill.getRgb() == (12, 34, 56, 255)
     assert canvas._draft_palette.vertex_outline == palette.vertex_outline
     saved = safe_load(editable_config_file.read_text())["shape"]
     assert saved["vertex_fill_color"] == [12, 34, 56, 255]
@@ -90,7 +90,7 @@ def test_point_colours_apply_to_drafts_and_existing_shapes_and_persist(
     assert reopened_palette.vertex_outline == palette.vertex_outline
     reopened_dialog = _open_settings_dialog(reopened)
     for key, expected in (
-        ("vertex_fill_color", palette.vertex_fill),
+        ("vertex_fill_color", canvas._draft_palette.vertex_fill),
         ("vertex_outline_color", palette.vertex_outline),
     ):
         button = reopened_dialog._editors[("shape", key)]

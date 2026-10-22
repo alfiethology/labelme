@@ -427,11 +427,10 @@ class Canvas(QtWidgets.QWidget):
                 if self._point_color_resolver
                 else None
             )
+            palette = Palette.from_rgb(rgb=self._color_resolver(label))
             palette = dataclasses.replace(
-                Palette.from_rgb(rgb=self._color_resolver(label)),
-                vertex_fill=(
-                    point_colors[0] if point_colors else self._draft_palette.vertex_fill
-                ),
+                palette,
+                vertex_fill=point_colors[0] if point_colors else palette.vertex_fill,
                 hvertex_fill=self._draft_palette.hvertex_fill,
                 vertex_outline=(
                     point_colors[1]
