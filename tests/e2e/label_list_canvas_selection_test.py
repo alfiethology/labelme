@@ -3,12 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
+import numpy as np
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QMessageBox
 from pytestqt.qtbot import QtBot
 
 from labelme._app import MainWindow
+from labelme._shape import Shape
 from labelme._widgets.canvas import Canvas
 
 from ..conftest import close_or_pause
@@ -18,6 +20,93 @@ from .conftest import schedule_on_dialog
 from .conftest import select_shape
 from .conftest import show_window_and_wait_for_imagedata
 from .conftest import submit_label_dialog
+
+
+@pytest.fixture()
+def mixed_shapes_win(raw_win: MainWindow) -> MainWindow:
+    shapes = [
+        Shape(
+            label="bird",
+            shape_type="polygon",
+            points=np.array([[20, 20], [80, 20], [80, 80]], dtype=np.float64),
+            closed=True,
+        ),
+        Shape(label="bird", shape_type="point", points=np.array([[100.0, 100.0]])),
+        Shape(
+            label="cat",
+            shape_type="rectangle",
+            points=np.array([[120, 20], [160, 80]], dtype=np.float64),
+        ),
+        Shape(label="cat", shape_type="point", points=np.array([[180.0, 100.0]])),
+        Shape(label="bird", shape_type="point", points=np.array([[200.0, 100.0]])),
+    ]
+    raw_win._load_shapes(shapes)
+    raw_win._docks.label_list[4].setCheckState(Qt.CheckState.Unchecked)
+    raw_win._docks.unique_label_list.add_label_item("unused", (0, 255, 0))
+    return raw_win
+
+
+@pytest.mark.gui
+def test_label_click_selects_its_visible_shapes_and_clicking_it_again_restores_them(
+    qtbot: QtBot, mixed_shapes_win: MainWindow
+) -> None:
+    win = mixed_shapes_win
+    canvas = win._canvas_widgets.canvas
+    labels = win._docks.unique_label_list
+    annotations = win._docks.label_list
+    bird = labels.find_label_item("bird")
+    assert bird is not None
+    position = labels.visualItemRect(bird).center()
+    qtbot.mouseClick(labels.viewport(), Qt.MouseButton.LeftButton, pos=position)
+    assert canvas.selected_shapes == canvas.shapes[:2]
+    assert [item.shape() for item in annotations.selected_items()] == canvas.shapes[:2]
+    assert all(
+        canvas._render_context(s, highlighted=False).selected for s in canvas.shapes[:2]
+    )
+    assert not canvas.shapes[4].visible
+    assert not win._is_changed
+
+    # An individual point replaces the whole-label selection.
+    qtbot.mouseClick(
+        annotations.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=annotations.visualRect(annotations.model().index(1, 0)).center(),
+    )
+    assert canvas.selected_shapes == [canvas.shapes[1]]
+    assert canvas._render_context(canvas.shapes[1], highlighted=False).selected
+    assert not canvas._render_context(canvas.shapes[0], highlighted=False).selected
+
+    qtbot.mouseClick(labels.viewport(), Qt.MouseButton.LeftButton, pos=position)
+    assert canvas.selected_shapes == canvas.shapes[:2]
+    qtbot.keyClick(labels, Qt.Key.Key_Escape)
+    assert canvas.selected_shapes == []
+    assert annotations.selected_items() == []
+    assert not win._is_changed
+
+
+@pytest.mark.gui
+def test_switching_labels_replaces_selection_and_absent_label_clears_it(
+    qtbot: QtBot, mixed_shapes_win: MainWindow
+) -> None:
+    win = mixed_shapes_win
+    canvas = win._canvas_widgets.canvas
+    labels = win._docks.unique_label_list
+    for label, expected in (
+        ("bird", canvas.shapes[:2]),
+        ("cat", canvas.shapes[2:4]),
+        ("unused", []),
+    ):
+        item = labels.find_label_item(label)
+        assert item is not None
+        qtbot.mouseClick(
+            labels.viewport(),
+            Qt.MouseButton.LeftButton,
+            pos=labels.visualItemRect(item).center(),
+        )
+        assert canvas.selected_shapes == expected
+        assert [i.shape() for i in win._docks.label_list.selected_items()] == expected
+        assert labels.selectedItems() == [item]
+    assert not win._is_changed
 
 
 def _draw_polygon(

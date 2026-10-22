@@ -3202,7 +3202,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
         unique_label_list = UniqueLabelQListWidget()
         unique_label_list.setToolTip(
-            self.tr("Select label to start annotating for it. Press 'Esc' to deselect.")
+            self.tr(
+                "Select a label to highlight its shapes and start annotating for it. "
+                "Press 'Esc' to deselect."
+            )
         )
         unique_label_list.itemChanged.connect(self._on_unique_label_item_changed)
         unique_label_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -3217,6 +3220,12 @@ class MainWindow(QtWidgets.QMainWindow):
                         label=lbl, unique_label_list=unique_label_list
                     ),
                 )
+        unique_label_list.itemSelectionChanged.connect(
+            self._unique_label_selection_changed
+        )
+        # Clicking the current label again restores the whole-label selection
+        # after selecting an individual shape in the Annotation List or canvas.
+        unique_label_list.itemClicked.connect(self._unique_label_selection_changed)
         label = QtWidgets.QDockWidget(self.tr("Label List"), self)
         label.setObjectName("Label List")
         label.setWidget(unique_label_list)
@@ -4268,6 +4277,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self._load_shapes(shapes=shapes, replace=False)
         self._canvas_widgets.canvas.select_shapes(shapes)
         self.mark_dirty()
+
+    def _unique_label_selection_changed(self) -> None:
+        labels = {
+            item.data(Qt.ItemDataRole.UserRole)
+            for item in self._docks.unique_label_list.selectedItems()
+        }
+        canvas = self._canvas_widgets.canvas
+        canvas.select_shapes(
+            [
+                shape
+                for shape in canvas.shapes
+                if shape.visible and shape.label in labels
+            ]
+        )
 
     def _label_selection_changed(self) -> None:
         selected_shapes: list[Shape] = []

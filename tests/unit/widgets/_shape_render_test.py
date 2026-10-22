@@ -19,6 +19,50 @@ from labelme._widgets._shape_render import render_shape
 _SIZE = 200
 
 
+@pytest.mark.parametrize("shape_type", ["point", "points"])
+@pytest.mark.parametrize("point_type", ["round", "square"])
+@pytest.mark.parametrize("scale", [0.5, 1.0, 2.0])
+@pytest.mark.parametrize("background", ["white", "black"])
+def test_selected_points_have_a_contrasting_halo_and_keep_label_colour(
+    shape_type: ShapeType,
+    point_type: Literal["round", "square"],
+    scale: float,
+    background: str,
+) -> None:
+    shape = _shape(shape_type, [[50, 50]])
+    palette = Palette.from_rgb(rgb=(40, 90, 220))
+    context = ShapeRenderContext(
+        scale=scale,
+        palette=palette,
+        point_size=8,
+        point_type=point_type,
+        selected=False,
+        fill=False,
+        highlight=None,
+        rotation_highlight=None,
+    )
+    images = []
+    for selected in (False, True):
+        image = QtGui.QImage(_SIZE, _SIZE, QtGui.QImage.Format.Format_ARGB32)
+        image.fill(QtGui.QColor(background))
+        painter = QtGui.QPainter(image)
+        try:
+            render_shape(
+                painter, shape, dataclasses.replace(context, selected=selected)
+            )
+        finally:
+            painter.end()
+        images.append(image)
+    normal, selected = images
+    center = int(50 * scale)
+    assert normal.pixelColor(center, center) == palette.vertex_fill
+    assert selected.pixelColor(center, center) == palette.vertex_fill
+    assert selected.pixelColor(center + 4, center) == palette.vertex_outline
+    assert selected.pixelColor(center + 6, center) == QtGui.QColor("white")
+    assert selected.pixelColor(center + 8, center) == QtGui.QColor("black")
+    assert normal != selected
+
+
 @pytest.mark.parametrize(
     ("shape_type", "points"),
     [

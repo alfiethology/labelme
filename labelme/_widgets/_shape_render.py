@@ -268,6 +268,25 @@ def _paint_shape_points(
         painter.setPen(arrow_pen)
         painter.drawPath(paths.orientation_arrow)
 
+    if context.selected and shape.shape_type in ("point", "points"):
+        # A point has no edge to turn white on selection. Surround its normal
+        # colours with a screen-sized halo that contrasts on light and dark images.
+        painter.save()
+        try:
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            for color, width in (
+                (QtGui.QColor(0, 0, 0), PEN_WIDTH + 8),
+                (palette.select_line, PEN_WIDTH + 4),
+            ):
+                pen = QtGui.QPen(color)
+                pen.setWidth(width)
+                pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
+                painter.setPen(pen)
+                painter.drawPath(paths.vertices)
+                painter.drawPath(paths.negative_vertices)
+        finally:
+            painter.restore()
+
     # Paint handles last so the shape's fill cannot tint their two colours.
     _paint_filled_vertices(
         painter=painter,
