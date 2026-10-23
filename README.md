@@ -318,6 +318,37 @@ labelme data_annotated/  # Open directory to annotate all images in it
 labelme data_annotated/ --labels labels.txt  # specify label list with a file
 ```
 
+### Extract frames from videos
+
+Choose **Tools > Extract Video Frames…** and add one or more **MP4 (.mp4)** or
+**AVI (.avi)** videos. Install [FFmpeg](https://ffmpeg.org/download.html) version
+5.1 or newer first; both `ffmpeg` and `ffprobe` must be available on your PATH.
+
+- Choose **Percentage** (including **100%** for every frame) or **Number of frames**
+  to apply the same request to each video. Percentages round up to at least one
+  frame; counts exceeding a video's length extract every frame.
+- For subsets, choose **Evenly spaced** or **Random**. Even spacing includes the
+  first and last frame (a single requested frame uses the middle); random
+  selection has no duplicates. The diagrams illustrate the difference.
+- Choose an existing output parent folder, then choose **Separate folder for each
+  video** or **All videos in one shared folder**. Edit each video's **Output name**
+  to rename its folder and filename prefix. Names must be unique.
+
+Each run creates a new `extracted_frames` folder inside the selected parent,
+using `extracted_frames_2`, etc. if needed. Existing files are never overwritten.
+Lossless PNG filenames include the video's output name and its original,
+zero-based frame index, e.g. `mouse_frame_000000123.png`.
+
+Extraction runs in a worker thread with a responsive dialog and cancellation.
+Extracting 100% needs one decoding pass; subsets first count decoded frames for
+accurate sampling, including variable frame rate footage. Cancelling keeps
+completed videos and discards the unfinished video's output. Failed videos are
+reported while the rest of the batch continues.
+
+Your current image, unsaved annotations, selection, output setting, and File List
+stay unchanged, including when the output parent is the directory you're
+annotating. Open or reload the extracted folder when you're ready to annotate it.
+
 ### Quickly edit shape names or bounding box shapes
 
 Choose **Tools > Class Name Quick Edit**, then left-click any visible shape on

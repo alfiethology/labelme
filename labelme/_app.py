@@ -96,6 +96,7 @@ from ._widgets.class_name_quick_edit import ClassNameQuickEditPopup
 from ._widgets.command_palette import Command
 from ._widgets.command_palette import CommandPalette
 from ._widgets.command_palette import collect_action_commands
+from ._widgets.frame_extractor_dialog import FrameExtractorDialog
 from ._widgets.quick_draw_dialog import QuickDrawDialog
 from ._yolo_predictions import shapes_from_yolo_result
 
@@ -1014,6 +1015,11 @@ class MainWindow(QtWidgets.QMainWindow):
             edit_menu=edit_menu,
         )
 
+    def _extract_video_frames(self) -> None:
+        dialog = FrameExtractorDialog(self)
+        dialog.exec()
+        dialog.deleteLater()
+
     def _setup_menus(self) -> _Menus:
         action = functools.partial(_utils.new_action, self)
         shortcuts = self._config["shortcuts"]
@@ -1119,6 +1125,14 @@ class MainWindow(QtWidgets.QMainWindow):
         _utils.add_actions(
             tools_menu,
             (
+                action(
+                    self.tr("Extract Video Frames…"),
+                    self._extract_video_frames,
+                    tip=self.tr(
+                        "Extract all or sampled frames from MP4 and AVI videos"
+                    ),
+                ),
+                None,
                 self._bounding_box_quick_edit_action,
                 self._class_name_quick_edit_action,
                 self._quick_draw_action,

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Tools > Extract Video Frames… for batch MP4/AVI extraction with FFmpeg, all frames or percentage/count sampling, random or evenly spaced selection, editable video output names, shared or separate folders, and cancellation without changing the current annotation session.
+
 - Clicking a label in the Label List now highlights all its visible shapes in the image and selects their Annotation List entries. Selected points gain a white halo with a black outline so they are easy to locate on light and dark images.
 - Added Tools > Class Name Quick Edit: click any visible shape, then click a suggested class name to relabel only that shape; suggestions include every JSON in the current File List, Space saves and advances, and Escape exits.
 - Populated label pickers with every distinct class name found in the current File List's JSON annotations, including unopened images, and made names entered through Edit Label available immediately without drawing another shape.
