@@ -77,8 +77,12 @@ See [Animal pose annotation](docs/pose-estimation.md) for the complete workflow.
 
 - Right-click a class in **Label List** and choose **Merge with…** to combine
   inconsistent names across the current image set.
-- [Draw repeated objects with Quick Draw](#draw-repeated-objects-with-quick-draw)
-  on randomly chosen unannotated images, with automatic saving and advance.
+- [Draw boxes or polygons with Quick Draw](#draw-repeated-objects-with-quick-draw),
+  with automatic class assignment, number-key corrections, and Space to save and
+  advance. Images follow file order unless random selection is enabled.
+- [Use the canvas-only Full Screen Editor](#full-screen-editor) with **F11**.
+- [Extract frames from videos](#extract-frames-from-videos) for annotation without
+  running a model.
 - Snap new and existing polygon vertices to points in other annotations, then
   drag coincident polygon vertices together while snapping remains enabled.
 - [Review existing annotations with Change Labels](#review-existing-annotations-with-change-labels)
@@ -242,6 +246,36 @@ Everything else, including the Python import surface, is internal and may change
 Run `labelme --help` for detail.\
 The annotations are saved as a [JSON](http://www.json.org/) file.
 
+### Get started with your first image set
+
+1. Start Labelme and choose **File > Open Dir** (**Ctrl+U**) to open an image
+   directory. Images in subdirectories are included. You can also start with
+   `labelme /path/to/images`.
+1. Choose **File > Change Output Dir** if you want JSON annotations in a separate
+   directory. Otherwise, choose **Save jsons to image path** when first asked
+   where to save, to keep each JSON beside its image.
+1. Choose a drawing tool: **Ctrl+N** for polygons, **Ctrl+R** for bounding boxes,
+   or **P** for points. Click two opposite corners for a box. For a polygon,
+   click its vertices, then press **Enter** or click its first vertex to close it.
+   Enter a class name when prompted.
+1. Press **Ctrl+J** to edit shapes. Select a shape and drag it to move it, or drag
+   a vertex/corner to adjust it. **Ctrl+E** edits the selected shape's label and
+   metadata; **Ctrl+Z** undoes the last change.
+1. Save with **Ctrl+S**. **File > Save Automatically** is enabled by default;
+   you can turn it off for manual saving. Use **D** for the next image and **A**
+   for the previous one, with keyboard focus on the canvas.
+
+When launched without an explicit path, Labelme reopens the last successfully
+opened image directory if it still exists. Window size and panel layout are
+remembered too; use **View > Reset Layout** to recover the default arrangement.
+
+For repeated boxes or polygons, use [Quick Draw](#draw-repeated-objects-with-quick-draw).
+For correcting existing shapes, use
+[Class Name Quick Edit or Bounding Box Shape Quick Edit](#quickly-edit-shape-names-or-bounding-box-shapes).
+For pose keypoints, start with [Draw and save a skeleton](#draw-and-save-a-skeleton).
+
+### Find commands and change settings
+
 Press **Ctrl+P** (or select **Edit > Command Palette…**) to search commands,
 tools, and settings by name. Matching is case-insensitive and also searches menu
 locations. Use **↑/↓** to select a result, **Enter** or a click to run it, and
@@ -250,6 +284,13 @@ in Settings. Unavailable commands are shown disabled, just as in the menus.
 **Keep Previous Annotation** now uses **Ctrl+Shift+P**;
 the old Ctrl+P binding in existing config files is migrated automatically.
 
+Open **File > Settings…** to change saving, label-dialog, drawing, canvas, and
+AI preferences. Changes apply immediately and are saved for later sessions.
+If Settings is disabled, the session is using command-line configuration
+instead; relaunch without those overrides to edit preferences in the dialog.
+
+### Save annotations
+
 The first time you save new annotations in a session, choose **Save jsons to
 image path** to save each JSON beside its image using the same filename stem,
 or **Choose json path manually** to use the file chooser for each new annotation
@@ -257,6 +298,30 @@ file. This choice lasts until Labelme closes. Existing annotations save to their
 known JSON files; **Save As** still opens the file chooser. An output directory
 selected with **Change Output Dir** or `--output` takes precedence over this
 session choice.
+
+### Navigate and edit precisely
+
+These are the default shortcuts; review tools such as Quick Draw and Change
+Labels reserve some keys while active. Keep focus on the canvas when using them.
+
+| Action | Shortcut or mouse gesture |
+| --- | --- |
+| Zoom around the cursor | **Ctrl+mouse wheel** |
+| Fit the image to the window | **Ctrl+F** |
+| Fit the image width | **Ctrl+Shift+F** |
+| Return to original image scale | **Ctrl+0** |
+| Zoom to a region | Press **Z**, then drag around the region |
+| Pan a zoomed image | Hold the middle mouse button and drag |
+| Scroll horizontally | **Shift+mouse wheel** |
+| Hide or restore menus, panels, and bars | **F11** |
+
+Adjust **Edit > Zoom Speed** from **1×** to **4×** to control zoom increments.
+
+To add a polygon vertex, enter edit mode (**Ctrl+J**), select the polygon, and
+click a highlighted edge. You can drag the new vertex immediately. To remove a
+vertex, hover it and **Alt+Shift+click**. To remove a standalone point, hover it
+in edit mode and press **Backspace**. **Delete** deletes selected whole shapes;
+**Ctrl+Z** restores an accidental edit or deletion.
 
 Enable **Edit > Lock Cursor to Pixels** near the bottom of the Edit menu to
 snap cursor placement to the nearest whole image-pixel coordinate, at any zoom
@@ -289,17 +354,22 @@ for untouched images. This is enabled by **View > Keep Previous
 Brightness/Contrast** and can be turned off there or in Settings. These image
 adjustments are remembered for the current Labelme session.
 
+### Choose canvas and point colours
+
 In **Settings > Drawing and canvas**, choose **Point inner colour** and
 **Point outer ring colour** independently. The defaults are yellow and black.
-These colours apply immediately to standalone points, shape vertices, and
-skeleton nodes, including existing shapes, and are saved for future sessions.
-Hover highlights and red negative/occluded points retain their status colours
-inside the selected outer ring.
+The inner colour controls points while drawing; once a shape has a label, its
+points use that class's colour. The outer ring uses the global setting unless
+that class has its own override. These settings cover standalone points,
+polygon vertices, and skeleton nodes, and are saved for future sessions.
+Hover highlights and negative/occluded points retain their status colours.
 
 To choose a separate pair for a class, right-click it in the class list and
 select **Change Class Color…**. Choose **Inner point / class colour** and
 **Point outer ring colour**, then click **OK**. Both colours are saved for that
 class and restored when Labelme reopens; other classes keep their colours.
+
+### Command-line examples
 
 ```bash
 labelme  # just open gui
@@ -362,15 +432,30 @@ images where you made no changes. A failed save keeps the current image open.
 Press **Escape** on the canvas, or uncheck the tool, to exit the mode. Ordinary
 Undo can revert an individual name change.
 
-**Tools > Bounding Box Shape Quick Edit** is the existing two-corner-click tool
-for changing bounding box geometry. Both tools use Space to save and advance;
-switching tools exits the previous mode.
+Choose **Tools > Bounding Box Shape Quick Edit** to correct existing rectangles.
+The first box is selected automatically. Click its new first corner, then its
+opposite corner; yellow dotted crosshairs and a preview guide the replacement.
+The next rectangle is selected automatically, skipping other shape types.
+Class names and metadata stay unchanged. After the final box, the image stays
+open until you press **Space** to save and advance. **Ctrl+Z** undoes a correction;
+**Escape** exits and discards an unfinished two-click correction.
+
+Both tools use Space to save and advance; switching tools exits the previous
+mode. Use [Quick Draw](#draw-repeated-objects-with-quick-draw) when you want to
+create new shapes instead.
 
 ### Choose labels from the whole image set
 
 The **Label List** sidebar includes every distinct class from the current
 **File List** as soon as a directory opens, including classes found only in
 unopened images. Its visibility checkboxes retain their states between images.
+
+Click a class name to select and highlight all its visible shapes in the
+current image, including their entries in **Annotation List**. Selected points
+have a white halo. Click an individual shape or Annotation List entry to work
+on just that shape; click the class again to restore selection of the whole
+class. The class selection also supplies the label for new annotations.
+Press **Escape** to deselect. Hidden shapes remain hidden and are not selected.
 
 **Edit Label** and the label picker for new shapes include all distinct class
 names found in JSON annotations associated with the current **File List**, even
@@ -620,6 +705,19 @@ exists, the skip is cancelled and an error identifies the collision. Rename or
 move the existing file, then press Shift+Space again. A successful skip removes
 the image from the current **File List** before loading the next available
 image, so the review cannot cycle back to a file that was already skipped.
+
+### Remove images with no annotation file
+
+Choose **Tools > Delete Unlabelled Images…** after opening an image directory.
+The confirmation shows how many images will be permanently deleted and from
+which directory. Choose **Yes** to delete them or **No** to cancel.
+
+“Unlabelled” means no corresponding JSON file exists. The tool checks beside
+each image, or in the configured annotation directory if one is selected. An
+existing JSON protects the image, even if it contains no shapes. The current
+image is also protected if it has unsaved edits. This scans the open directory
+and its subdirectories, including images outside a filtered File List. Deleted
+images are removed from File List; this operation cannot be undone.
 
 ### Use a custom YOLO model
 
