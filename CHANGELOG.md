@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Tools > Full Screen Editor (F11) to fill the app window with the canvas by hiding all menus, toolbars, panels, and the status bar; F11 restores the previous layout without changing the window size.
+
 - Added Tools > Extract Video Frames… for batch MP4/AVI extraction with FFmpeg, all frames or percentage/count sampling, random or evenly spaced selection, editable video output names, shared or separate folders, and cancellation without changing the current annotation session.
 
 - Clicking a label in the Label List now highlights all its visible shapes in the image and selects their Annotation List entries. Selected points gain a white halo with a black outline so they are easy to locate on light and dark images.

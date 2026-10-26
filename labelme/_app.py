@@ -300,6 +300,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._change_label_choices: dict[str, str] | None = None
         self._bounding_box_quick_edit_active = False
         self._class_name_quick_edit_active = False
+        self._editor_layout_state: QtCore.QByteArray | None = None
+        self._editor_chrome: dict[QtWidgets.QWidget, bool] = {}
         self._quick_draw: _QuickDrawSession | None = None
         self._change_label_index = 0
         self._change_label_input = ""
@@ -1109,6 +1111,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Space saves and opens the next image"
             ),
         )
+        self._full_screen_editor_action = action(
+            self.tr("Full Screen Editor"),
+            self._toggle_full_screen_editor,
+            shortcut="F11",
+            checkable=True,
+            tip=self.tr(
+                "Hide all panels and bars; press F11 to restore the editor layout"
+            ),
+        )
+        # Keep the shortcut reachable even while its menu is hidden.
+        self.addAction(self._full_screen_editor_action)
         self._quick_draw_action = action(
             self.tr("Quick Draw…"),
             self._toggle_quick_draw,
@@ -1132,6 +1145,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._bounding_box_quick_edit_action,
                 self._class_name_quick_edit_action,
                 self._quick_draw_action,
+                self._full_screen_editor_action,
                 action(
                     self.tr("Change Labels…"),
                     self._change_labels,
@@ -4886,7 +4900,34 @@ class MainWindow(QtWidgets.QMainWindow):
         available_w = self.centralWidget().width() - FIT_WIDTH_SCROLLBAR_MARGIN
         return available_w / self._canvas_widgets.canvas.pixmap.width()
 
+    def _toggle_full_screen_editor(self, enabled: bool) -> None:
+        self._full_screen_editor_action.setChecked(enabled)
+        if enabled:
+            if self._editor_layout_state is not None:
+                return
+            self._editor_layout_state = self.saveState()
+            chrome: list[QtWidgets.QWidget] = [
+                self.menuBar(),
+                self.statusBar(),
+                *self.findChildren(QtWidgets.QToolBar),
+                *self.findChildren(QtWidgets.QDockWidget),
+            ]
+            self._editor_chrome = {widget: not widget.isHidden() for widget in chrome}
+            for widget in self._editor_chrome:
+                widget.installEventFilter(self)
+                widget.hide()
+        elif self._editor_layout_state is not None:
+            state = self._editor_layout_state
+            self._editor_layout_state = None
+            for widget, visible in self._editor_chrome.items():
+                widget.removeEventFilter(self)
+                widget.setVisible(visible)
+            self._editor_chrome.clear()
+            self.restoreState(state)
+        self._canvas_widgets.canvas.setFocus()
+
     def _reset_layout(self) -> None:
+        self._toggle_full_screen_editor(False)
         self._window_state.remove("window/state")
         self.restoreState(self._default_state)
 
@@ -4910,7 +4951,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self._toggle_class_name_quick_edit(False)
         self._window_state.setValue("window/size", self.size())
         self._window_state.setValue("window/position", self.pos())
-        self._window_state.setValue("window/state", self.saveState())
+        self._window_state.setValue(
+            "window/state",
+            self._editor_layout_state
+            if self._editor_layout_state is not None
+            else self.saveState(),
+        )
 
     def dragEnterEvent(self, a0: QtGui.QDragEnterEvent) -> None:
         extensions = _list_supported_image_extensions()
@@ -5536,6 +5582,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._zoom_rect_button.setChecked(checked)
 
     def eventFilter(self, watched: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        if (
+            self._editor_layout_state is not None
+            and watched in self._editor_chrome
+            and event.type() == QtCore.QEvent.Type.Show
+        ):
+            # Navigation and editing tools sometimes explicitly show their bars.
+            # Keep the canvas-only view until the user restores the layout.
+            assert isinstance(watched, QtWidgets.QWidget)
+            watched.hide()
+            return True
         if (
             self._class_name_quick_edit_active
             and watched is self._canvas_widgets.canvas

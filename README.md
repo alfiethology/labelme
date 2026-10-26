@@ -408,6 +408,13 @@ unsaved. The retired name disappears from Label List, label suggestions, and
 editable predefined-label settings. Undoing a geometry edit does not bring it
 back. Cancel the label picker to leave everything unchanged.
 
+### Full Screen Editor
+
+Choose **Tools > Full Screen Editor**, or press **F11**, to give the entire app
+window to the canvas. This hides the menu, toolbars, side panels, and status bar
+while keeping the current window size. Press **F11** again to restore your
+previous layout. Drawing and navigation shortcuts remain available.
+
 ### Draw repeated objects with Quick Draw
 
 Open an image directory, then choose **Tools > Quick Draw…**. Select one
