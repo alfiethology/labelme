@@ -50,7 +50,7 @@ class _ObjectNameDelegate(QtWidgets.QStyledItemDelegate):
 
 
 class QuickDrawDialog(QtWidgets.QDialog):
-    """Configure the ordered objects to draw on every image in a session."""
+    """Configure one shape type and an ordered set of classes for a session."""
 
     def __init__(
         self,
@@ -60,13 +60,15 @@ class QuickDrawDialog(QtWidgets.QDialog):
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(self.tr("Quick Draw"))
-        self.resize(480, 360)
+        self.resize(720, 360)
         layout = QtWidgets.QVBoxLayout(self)
         help_text = QtWidgets.QLabel(
             self.tr(
-                "Draw bounding boxes in the order below on randomly chosen "
-                "unannotated images. Completed images save automatically.\n"
-                "Space saves completed boxes and moves on, or skips an empty image. "
+                "Choose one shape type for this session. Shapes automatically use "
+                "the classes from left to right, repeating on each image.\n"
+                "After drawing a shape, press its class key (1–9) to change its class. "
+                "Space saves and moves on, or skips an empty image. "
+                "E edits the latest shape once, then resumes drawing. "
                 "Escape stops Quick Draw.\n"
                 "JSONs are saved beside the images, or in your configured "
                 "annotation directory."
@@ -74,39 +76,35 @@ class QuickDrawDialog(QtWidgets.QDialog):
         )
         help_text.setWordWrap(True)
         layout.addWidget(help_text)
-        self.table = QtWidgets.QTableWidget(0, 2)
-        self.table.setItemDelegateForColumn(0, _ObjectNameDelegate(labels, self.table))
-        self.table.setHorizontalHeaderLabels(
-            [self.tr("Object name"), self.tr("Boxes per image")]
-        )
+        shape_row = QtWidgets.QFormLayout()
+        self.shape_type = QtWidgets.QComboBox()
+        self.shape_type.addItem(self.tr("Bounding box"), "rectangle")
+        self.shape_type.addItem(self.tr("Polygon"), "polygon")
+        shape_row.addRow(self.tr("Shape type"), self.shape_type)
+        layout.addLayout(shape_row)
+        self.table = QtWidgets.QTableWidget(1, 0)
+        self.table.verticalHeader().hide()
+        self.table.setItemDelegate(_ObjectNameDelegate(labels, self.table))
         self.table.horizontalHeader().setSectionResizeMode(
             QtWidgets.QHeaderView.ResizeMode.Stretch
         )
         self.table.setSelectionBehavior(
-            QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
+            QtWidgets.QAbstractItemView.SelectionBehavior.SelectColumns
         )
-        self.table.itemChanged.connect(self._update_total)
+        self.table.itemChanged.connect(self._update_validation)
         self.table.clicked.connect(self._edit_object_name)
         layout.addWidget(self.table)
-        count_hint = QtWidgets.QLabel(
-            self.tr(
-                "(0 for no limit). Put an unlimited object in the last row; "
-                "press Space to save and move on."
-            )
-        )
-        count_hint.setWordWrap(True)
-        layout.addWidget(count_hint)
+        self.random_images = QtWidgets.QCheckBox(self.tr("Choose images randomly"))
+        layout.addWidget(self.random_images)
         row_buttons = QtWidgets.QHBoxLayout()
-        add = QtWidgets.QPushButton(self.tr("Add object"))
-        add.clicked.connect(self.add_object)
+        self.add_button = QtWidgets.QPushButton(self.tr("Add class"))
+        self.add_button.clicked.connect(self.add_class)
         remove = QtWidgets.QPushButton(self.tr("Remove selected"))
         remove.clicked.connect(self._remove_selected)
-        row_buttons.addWidget(add)
+        row_buttons.addWidget(self.add_button)
         row_buttons.addWidget(remove)
         row_buttons.addStretch()
         layout.addLayout(row_buttons)
-        self.total = QtWidgets.QLabel()
-        layout.addWidget(self.total)
         buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel
@@ -116,71 +114,48 @@ class QuickDrawDialog(QtWidgets.QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-        self.add_object()
+        self.add_class()
 
-    def add_object(self) -> None:
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-        count = QtWidgets.QSpinBox()
-        count.setRange(0, 9999)
-        count.setValue(1)
-        count.valueChanged.connect(self._update_total)
-        self.table.setCellWidget(row, 1, count)
-        self.table.setItem(row, 0, QtWidgets.QTableWidgetItem(""))
-        self.table.setCurrentCell(row, 0)
-        self._update_total()
+    def add_class(self) -> None:
+        column = self.table.columnCount()
+        if column >= 9:
+            return
+        blocker = QtCore.QSignalBlocker(self.table)
+        self.table.insertColumn(column)
+        self.table.setItem(0, column, QtWidgets.QTableWidgetItem(""))
+        self.table.setCurrentCell(0, column)
+        del blocker
+        self._update_validation()
 
     def _edit_object_name(self, index: QtCore.QModelIndex) -> None:
-        if index.column() == 0:
-            item = self.table.item(index.row(), 0)
-            assert item is not None
-            self.table.editItem(item)
+        item = self.table.item(0, index.column())
+        assert item is not None
+        self.table.editItem(item)
 
     def _remove_selected(self) -> None:
-        rows = {index.row() for index in self.table.selectedIndexes()}
-        for row in sorted(rows, reverse=True):
-            self.table.removeRow(row)
-        self._update_total()
+        columns = {index.column() for index in self.table.selectedIndexes()}
+        for column in sorted(columns, reverse=True):
+            self.table.removeColumn(column)
+        self._update_validation()
 
     def label_sequence(self) -> tuple[str, ...]:
-        labels: list[str] = []
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            count = self.table.cellWidget(row, 1)
-            assert item is not None and isinstance(count, QtWidgets.QSpinBox)
-            labels.extend([item.text().strip()] * count.value())
-        return tuple(labels)
-
-    def unlimited_label(self) -> str | None:
-        if not self.table.rowCount():
-            return None
-        row = self.table.rowCount() - 1
-        count = self.table.cellWidget(row, 1)
-        item = self.table.item(row, 0)
-        assert item is not None and isinstance(count, QtWidgets.QSpinBox)
-        return item.text().strip() if count.value() == 0 else None
+        return tuple(
+            self.table.item(0, column).text().strip()
+            for column in range(self.table.columnCount())
+        )
 
     def is_valid(self) -> bool:
-        if not self.table.rowCount():
-            return False
-        for row in range(self.table.rowCount()):
-            item = self.table.item(row, 0)
-            count = self.table.cellWidget(row, 1)
-            assert item is not None and isinstance(count, QtWidgets.QSpinBox)
-            if not item.text().strip():
-                return False
-            if count.value() == 0 and row != self.table.rowCount() - 1:
-                return False
-        return True
-
-    def _update_total(self) -> None:
         labels = self.label_sequence()
-        if self.unlimited_label() is not None:
-            self.total.setText(self.tr("Total boxes per image: no limit"))
-        else:
-            self.total.setText(
-                self.tr("Total boxes per image: {count}").format(count=len(labels))
-            )
+        return bool(labels) and all(labels)
+
+    def _update_validation(self) -> None:
+        self.table.setHorizontalHeaderLabels(
+            [
+                self.tr("Class {key}").format(key=i + 1)
+                for i in range(self.table.columnCount())
+            ]
+        )
+        self.add_button.setEnabled(self.table.columnCount() < 9)
         self.start_button.setEnabled(self.is_valid())
 
     def accept(self) -> None:

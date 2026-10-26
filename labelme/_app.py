@@ -111,17 +111,13 @@ class _ZoomMode(enum.Enum):
 class _QuickDrawSession:
     labels: tuple[str, ...]
     remaining: list[str]
-    unlimited_label: str | None = None
+    shape_type: Literal["rectangle", "polygon"] = "rectangle"
+    random_images: bool = False
     loading: bool = False
+    editing: bool = False
 
     def label_for(self, index: int) -> str:
-        if index < len(self.labels):
-            return self.labels[index]
-        assert self.unlimited_label is not None
-        return self.unlimited_label
-
-    def is_complete(self, count: int) -> bool:
-        return self.unlimited_label is None and count >= len(self.labels)
+        return self.labels[index % len(self.labels)]
 
 
 _ZOOM_SPEEDS: Final[tuple[int, ...]] = (1, 2, 3, 4)
@@ -1412,11 +1408,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not dialog.is_valid():
             return
         labels = dialog.label_sequence()
-        unlimited_label = dialog.unlimited_label()
-        all_labels = labels + (
-            (unlimited_label,) if unlimited_label is not None else ()
-        )
-        for label in dict.fromkeys(all_labels):
+        for label in dict.fromkeys(labels):
             if not self.validate_label(label):
                 self.show_error_message(
                     self.tr("Invalid label"),
@@ -1441,7 +1433,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toggle_zoom_rect(False)
         self.mark_clean()  # _can_continue has saved or authorized discarding changes.
         self._quick_draw = _QuickDrawSession(
-            labels=labels, remaining=remaining, unlimited_label=unlimited_label
+            labels=labels,
+            remaining=remaining,
+            shape_type=dialog.shape_type.currentData(),
+            random_images=dialog.random_images.isChecked(),
         )
         self._quick_draw_action.setChecked(True)
         self._open_next_quick_draw_image()
@@ -1468,7 +1463,11 @@ class MainWindow(QtWidgets.QMainWindow):
         # removed since setup. Each candidate is visited at most once per run.
         current_set = set(self.image_list)
         while session.remaining:
-            path = random.choice(session.remaining)
+            path = (
+                random.choice(session.remaining)
+                if session.random_images
+                else session.remaining[0]
+            )
             session.remaining.remove(path)
             if path in current_set and self._quick_draw_eligible(path):
                 break
@@ -1479,6 +1478,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 10000,
             )
             return
+        session.editing = False
         session.loading = True
         try:
             self._load_file(image_or_label_path=path)
@@ -1495,7 +1495,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # empty snapshot so even the first completed box can be undone.
         self._canvas_widgets.canvas.backup_shapes()
         self._switch_canvas_mode(
-            edit=False, create_mode="rectangle", keep_quick_draw=True
+            edit=False, create_mode=session.shape_type, keep_quick_draw=True
         )
         self._canvas_widgets.canvas.setFocus()
         self._update_quick_draw_progress()
@@ -1505,23 +1505,26 @@ class MainWindow(QtWidgets.QMainWindow):
         if session is None:
             return
         completed = len(self._canvas_widgets.canvas.shapes)
-        if session.unlimited_label is not None:
+        if session.editing:
             text = self.tr(
-                "Quick Draw: box {index} — {label} (no limit) | "
+                "Quick Draw: edit a shape once to resume drawing | "
                 "Space: save and next · Esc: stop"
-            ).format(index=completed + 1, label=session.label_for(completed))
-        elif not session.is_complete(completed):
-            text = self.tr(
-                "Quick Draw: box {index}/{total} — {label} | Space: next · Esc: stop"
-            ).format(
-                index=completed + 1,
-                total=len(session.labels),
-                label=session.labels[completed],
             )
         else:
             text = self.tr(
-                "Quick Draw: {total}/{total} boxes | Space: save and next · Esc: stop"
-            ).format(total=len(session.labels))
+                "Quick Draw: {shape} {index} — {label} | "
+                "E: edit latest · Space: save and next · Esc: stop"
+            ).format(
+                shape=self.tr("polygon")
+                if session.shape_type == "polygon"
+                else self.tr("box"),
+                index=completed + 1,
+                label=session.label_for(completed),
+            )
+        choices = " · ".join(
+            f"{key}: {label}" for key, label in enumerate(session.labels, start=1)
+        )
+        text += " | " + choices
         self._quick_draw_progress.setText(text)
         self._quick_draw_progress.show()
 
@@ -1537,18 +1540,60 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mark_clean()
         self._open_next_quick_draw_image()
 
-    def _finish_quick_draw_image(
-        self, session: _QuickDrawSession, image_path: str | None
-    ) -> None:
-        # Defer navigation until Canvas has returned from its new_shape signal.
-        # Undo, manual navigation, or leaving the mode invalidates this callback.
+    def _edit_quick_draw_shape(self) -> None:
+        session = self._quick_draw
+        canvas = self._canvas_widgets.canvas
+        if session is None or not canvas.shapes:
+            return
+        canvas._cancel_current_shape()
+        session.editing = True
+        self._switch_canvas_mode(edit=True, keep_quick_draw=True)
+        canvas.select_shapes([canvas.shapes[-1]])
+        self._update_quick_draw_progress()
+
+    def _finish_quick_draw_edit(self) -> None:
+        session = self._quick_draw
+        if session is None or not session.editing:
+            return
+        session.editing = False
+        self._switch_canvas_mode(
+            edit=False, create_mode=session.shape_type, keep_quick_draw=True
+        )
+        self._update_quick_draw_progress()
+
+    def _relabel_quick_draw_shape(self, index: int) -> None:
+        session = self._quick_draw
+        canvas = self._canvas_widgets.canvas
         if (
-            self._quick_draw is session
-            and self._image_path == image_path
-            and session.is_complete(len(self._canvas_widgets.canvas.shapes))
-            and QtWidgets.QApplication.activeModalWidget() is None
+            session is None
+            or index >= len(session.labels)
+            or not canvas.shapes
+            or canvas.is_drawing
         ):
-            self._advance_quick_draw_image()
+            return
+        shape = canvas.shapes[-1]
+        label = session.labels[index]
+        if shape.label == label:
+            return
+        shape.label = label
+        shape.flags = {
+            key: False
+            for pattern, keys in compile_label_flags(
+                self._config["label_flags"]
+            ).items()
+            if pattern.match(label)
+            for key in keys
+        }
+        canvas.backup_shapes()
+        self._label_dialog.add_label_history(label)
+        label_list = self._docks.unique_label_list
+        if label_list.find_label_item(label) is None:
+            label_list.add_label_item(
+                label, self._get_rgb_by_label(label=label, unique_label_list=label_list)
+            )
+        self._refresh_class_color(label=label)
+        self.mark_dirty()
+        canvas.update()
 
     def _stop_quick_draw(self) -> None:
         if self._quick_draw is None:
@@ -3181,6 +3226,7 @@ class MainWindow(QtWidgets.QMainWindow):
             )
         )
         canvas.shape_moved.connect(self.mark_dirty)
+        canvas.shape_moved.connect(self._finish_quick_draw_edit)
         canvas.selection_changed.connect(self._on_shape_selection_changed)
         canvas.class_name_requested.connect(self._quick_edit_class_name)
         canvas.drawing_polygon.connect(self._on_drawing_polygon_changed)
@@ -3389,12 +3435,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self._actions.save.setEnabled(True)
         self.setWindowTitle(self._get_window_title(dirty=True))
         if self._quick_draw is not None:
-            # Undoing a completed box after a failed save resumes drawing it.
-            if not self._quick_draw.is_complete(
-                len(self._canvas_widgets.canvas.shapes)
-            ):
+            if not self._quick_draw.editing:
                 self._switch_canvas_mode(
-                    edit=False, create_mode="rectangle", keep_quick_draw=True
+                    edit=False,
+                    create_mode=self._quick_draw.shape_type,
+                    keep_quick_draw=True,
                 )
             self._update_quick_draw_progress()
 
@@ -4464,16 +4509,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self._actions.undo_last_point.setEnabled(False)
             self._actions.undo.setEnabled(True)
             self.mark_dirty()
-            if quick_draw is not None and quick_draw.is_complete(
-                len(self._canvas_widgets.canvas.shapes)
-            ):
-                self._switch_canvas_mode(edit=True, keep_quick_draw=True)
-                QtCore.QTimer.singleShot(
-                    0,
-                    functools.partial(
-                        self._finish_quick_draw_image, quick_draw, self._image_path
-                    ),
-                )
         else:
             self._canvas_widgets.canvas.undo_last_line()
             self._canvas_widgets.canvas.shape_backups.pop()
@@ -5523,13 +5558,20 @@ class MainWindow(QtWidgets.QMainWindow):
             and isinstance(event, QtGui.QKeyEvent)
             and event.type()
             in (QtCore.QEvent.Type.ShortcutOverride, QtCore.QEvent.Type.KeyPress)
-            and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Escape)
+            and (
+                event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Escape, Qt.Key.Key_E)
+                or Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_9
+            )
             and event.modifiers() == Qt.KeyboardModifier.NoModifier
         ):
             event.accept()
             if event.type() == QtCore.QEvent.Type.KeyPress and not event.isAutoRepeat():
                 if event.key() == Qt.Key.Key_Space:
                     self._advance_quick_draw_image()
+                elif event.key() == Qt.Key.Key_E:
+                    self._edit_quick_draw_shape()
+                elif Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_9:
+                    self._relabel_quick_draw_shape(event.key() - Qt.Key.Key_1)
                 else:
                     self._stop_quick_draw()
             return True

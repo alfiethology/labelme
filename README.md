@@ -410,24 +410,31 @@ back. Cancel the label picker to leave everything unchanged.
 
 ### Draw repeated objects with Quick Draw
 
-Open an image directory, then choose **Tools > Quick Draw…**. Enter each object
-name and how many boxes to draw for it on every image. Click an object name to
-choose from the current Label List, or type a new name. Add rows for different
-objects; boxes are requested in row order. Set **Boxes per image** to **0** for
-no limit: keep drawing that object until you press **Space** to save and move on.
-An unlimited object must be the last row, after any fixed counts. This initial
-version supports bounding boxes, drawn with the usual two corner clicks.
+Open an image directory, then choose **Tools > Quick Draw…**. Select one
+**Shape type** for the entire session: **Bounding box** or **Polygon**. Enter up
+to nine classes in the numbered columns, using **Add class** for more columns.
+Click a class cell to choose from the current Label List, or type a new name.
+Shapes receive classes from left to right in drawing order, repeating the
+sequence as needed and restarting on each image. Draw boxes with two corner
+clicks; draw polygon vertices and press **Enter** or click the first vertex to
+close the polygon. No class prompt appears after drawing.
 
-Quick Draw randomly chooses images from the current File List that have no JSON
-annotation file. The status bar shows which object to draw next. Labels are
-assigned automatically, and completing the requested number of boxes saves the
-annotations and opens another random image. JSONs go beside their images, or into
-the annotation directory configured with **File > Change Output Dir**.
+Quick Draw visits unannotated images in the current File List order. Tick
+**Choose images randomly** to opt into random selection. The status bar shows
+which object to draw next. Labels are assigned automatically. Images only advance
+when you press **Space**. JSONs go beside their images, or into the annotation
+directory configured with **File > Change Output Dir**.
 
-- **Space** saves the boxes already completed and advances early. With no boxes,
-  it skips the image without creating an empty JSON. An unfinished box is discarded.
-- **Escape**, or unchecking **Tools > Quick Draw…**, stops the run. Completed boxes
-  on the current image remain available to save or undo normally.
+- **1–9** changes the latest completed shape to the class in that numbered
+  column. This only corrects its class; the next shape still uses the next class
+  in the automatic sequence. Keys without a class assigned do nothing, and
+  class keys are ignored while a new shape is unfinished.
+- **Space** saves completed shapes and advances. With no shapes, it skips the
+  image without creating an empty JSON. An unfinished shape is discarded.
+- **E** selects the latest shape for editing. Move it or drag a vertex/corner;
+  drawing resumes as soon as that edit is finished.
+- **Escape**, or unchecking **Tools > Quick Draw…**, stops the run. Completed
+  shapes on the current image remain available to save or undo normally.
 - Each image is visited at most once per run, including skipped images. Starting
   another run makes skipped images available again. Existing JSONs, including
   empty annotation files, are left alone.
