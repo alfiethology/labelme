@@ -450,8 +450,9 @@ The first box is selected automatically and shown with a thin, dashed outline
 and no fill so the animal remains visible. Other rectangles, including their
 labels, corner handles, and centre dots, are hidden until selected during the
 first pass. Editing or pressing **Tab** on the last box makes all boxes reappear
-for review. **Shift+Tab** then revisits them with the selected box dotted while
-the others remain visible. Exiting Quick Edit also restores their display.
+for review. **Shift+Tab** returns to editing one box at a time, hiding the others
+again. Advancing past the last box restores the all-boxes overview. Exiting
+Quick Edit also restores their display.
 Click the selected box's new first corner, then its
 opposite corner; dotted crosshairs and a preview guide the replacement.
 The next rectangle is selected automatically, skipping other shape types.

@@ -492,7 +492,7 @@ def test_other_boxes_are_hidden_during_first_pass_and_return_for_review(
     assert image.pixelColor(50, 50) != background
     qtbot.keyClick(canvas, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
     review = render()
-    assert review.pixelColor(20, 20) != background
+    assert review.pixelColor(20, 20) == background
     assert review.pixelColor(50, 50) != background
     assert (
         canvas._render_context(second, highlighted=False).line_style
@@ -502,6 +502,18 @@ def test_other_boxes_are_hidden_during_first_pass_and_return_for_review(
         canvas._render_context(first, highlighted=False).line_style
         == Qt.PenStyle.SolidLine
     )
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+    review = render()
+    assert review.pixelColor(20, 20) != background
+    assert review.pixelColor(50, 50) == background
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    review = render()
+    assert review.pixelColor(20, 20) == background
+    assert review.pixelColor(50, 50) != background
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    overview = render()
+    assert overview.pixelColor(20, 20) != background
+    assert overview.pixelColor(50, 50) != background
     qtbot.keyClick(canvas, Qt.Key.Key_Escape)
     restored = render()
     assert restored.pixelColor(20, 20) != background
@@ -558,10 +570,10 @@ def test_finishing_last_box_shows_all_and_next_image_starts_with_one_box(
     assert canvas._should_render_shape(first)
     assert canvas._should_render_shape(second)
     assert Path(win._image_path) == path
-    # Revisiting keeps the overview, including after another completed edit.
+    # Revisiting isolates the selected box; finishing restores the overview.
     qtbot.keyClick(canvas, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
     assert canvas.selected_shapes == [second]
-    assert canvas._should_render_shape(first)
+    assert not canvas._should_render_shape(first)
     click_canvas_fraction(qtbot, canvas, (0.4, 0.4))
     click_canvas_fraction(qtbot, canvas, (0.8, 0.8))
     assert canvas._should_render_shape(first)

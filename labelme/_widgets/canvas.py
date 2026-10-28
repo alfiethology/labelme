@@ -912,8 +912,9 @@ class Canvas(QtWidgets.QWidget):
 
     def _select_quick_edit_rectangle(self) -> None:
         rectangles = self._quick_edit_rectangles()
-        if rectangles and self._quick_edit_index >= len(rectangles):
-            self._quick_edit_review_complete = True
+        self._quick_edit_review_complete = bool(rectangles) and (
+            self._quick_edit_index >= len(rectangles)
+        )
         selected = rectangles[self._quick_edit_index : self._quick_edit_index + 1]
         for shape in selected:
             shape.visible = True
