@@ -858,6 +858,18 @@ class Canvas(QtWidgets.QWidget):
             shape.visible = True
         self.select_shapes(selected)
 
+    def skip_quick_edit_rectangle(self) -> None:
+        if not self._bounding_box_quick_edit:
+            return
+        if self._quick_edit_index >= len(self._quick_edit_rectangles()):
+            return
+        # A first corner is only a preview; skipping leaves the box unchanged.
+        self._quick_edit_corner = None
+        self._quick_edit_index += 1
+        self._select_quick_edit_rectangle()
+        self._update_status()
+        self.update()
+
     def _quick_edit_click(self, pos: QPointF) -> None:
         rectangles = self._quick_edit_rectangles()
         if self._quick_edit_index >= len(rectangles):
@@ -970,6 +982,7 @@ class Canvas(QtWidgets.QWidget):
             self.status_updated.emit(
                 self.tr(
                     "Bounding Box Shape Quick Edit: %s • "
+                    "Tab to skip box • "
                     "Space to save and open next image • Esc to exit"
                 )
                 % prompt

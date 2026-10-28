@@ -436,6 +436,10 @@ Choose **Tools > Bounding Box Shape Quick Edit** to correct existing rectangles.
 The first box is selected automatically. Click its new first corner, then its
 opposite corner; yellow dotted crosshairs and a preview guide the replacement.
 The next rectangle is selected automatically, skipping other shape types.
+Press **Tab** on the canvas to leave the selected box unchanged and select the
+next one. Tab also discards an unfinished first-corner preview. Skipping the last
+box keeps the current image open; **Space** remains the key to save and advance
+to the next image.
 Class names and metadata stay unchanged. After the final box, the image stays
 open until you press **Space** to save and advance. **Ctrl+Z** undoes a correction;
 **Escape** exits and discards an unfinished two-click correction.

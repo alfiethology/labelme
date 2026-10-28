@@ -167,3 +167,82 @@ def test_next_annotated_image_restarts_at_first_rectangle(
     click_canvas_fraction(qtbot, canvas, (0.7, 0.7))
     assert canvas.selected_shapes == [canvas.shapes[2]]
     win.mark_clean()
+
+
+def test_tab_skips_third_of_four_same_class_boxes_and_space_advances_image(
+    quick_edit_win: MainWindow,
+    qtbot: QtBot,
+) -> None:
+    win = quick_edit_win
+    canvas = win._canvas_widgets.canvas
+    win._docks.label_list.clear()
+    win._load_shapes(
+        [
+            Shape(
+                label="animal",
+                shape_type="rectangle",
+                points=np.array([[10.0 + i, 10.0], [30.0 + i, 30.0]]),
+            )
+            for i in range(4)
+        ]
+    )
+    win._toggle_bounding_box_quick_edit(True)
+    original_path = win._image_path
+    skipped_points = canvas.shapes[2].points.copy()
+    for _ in range(2):
+        click_canvas_fraction(qtbot, canvas, (0.2, 0.2))
+        click_canvas_fraction(qtbot, canvas, (0.8, 0.8))
+    assert canvas.selected_shapes == [canvas.shapes[2]]
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    assert canvas.selected_shapes == [canvas.shapes[3]]
+    assert canvas.hasFocus()
+    assert win._image_path == original_path
+    np.testing.assert_array_equal(canvas.shapes[2].points, skipped_points)
+    click_canvas_fraction(qtbot, canvas, (0.3, 0.3))
+    click_canvas_fraction(qtbot, canvas, (0.9, 0.9))
+    assert canvas.selected_shapes == []
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)  # No remaining box: stay on this image.
+    assert win._image_path == original_path
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    assert Path(win._image_path).name == "b.png"
+    shapes = json.loads(Path(original_path).with_suffix(".json").read_text())["shapes"]
+    np.testing.assert_allclose(shapes[0]["points"], [[20, 20], [80, 80]], atol=1)
+    np.testing.assert_allclose(shapes[1]["points"], [[20, 20], [80, 80]], atol=1)
+    np.testing.assert_array_equal(shapes[2]["points"], skipped_points)
+    np.testing.assert_allclose(shapes[3]["points"], [[30, 30], [90, 90]], atol=1)
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_tab_leaves_boxes_unchanged_and_does_not_add_undo_history(
+    quick_edit_win: MainWindow,
+    qtbot: QtBot,
+    partial: bool,
+) -> None:
+    win = quick_edit_win
+    canvas = win._canvas_widgets.canvas
+    first, point, second = canvas.shapes
+    first_points = first.points.copy()
+    original_path = win._image_path
+    backups = len(canvas.shape_backups)
+    if partial:
+        click_canvas_fraction(qtbot, canvas, (0.2, 0.2))
+        assert canvas._quick_edit_corner is not None
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    assert canvas.selected_shapes == [second]  # The intervening point is ignored.
+    assert canvas._quick_edit_corner is None
+    assert not win._is_changed
+    assert len(canvas.shape_backups) == backups
+    np.testing.assert_array_equal(first.points, first_points)
+    np.testing.assert_array_equal(point.points, [[50, 50]])
+    assert (first.label, first.group_id, first.description, first.flags) == (
+        "first",
+        7,
+        "keep me",
+        {"occluded": True},
+    )
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    assert canvas.selected_shapes == []
+    assert win._image_path == original_path
+    assert not win._is_changed
+    assert len(canvas.shape_backups) == backups
+    assert not Path(original_path).with_suffix(".json").exists()
