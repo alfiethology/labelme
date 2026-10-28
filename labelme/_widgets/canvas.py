@@ -816,6 +816,7 @@ class Canvas(QtWidgets.QWidget):
             self.set_class_name_quick_edit(False)
         self._bounding_box_quick_edit = enabled
         self._quick_edit_index = 0
+        self._quick_edit_order = []
         self._quick_edit_corner = None
         self._reset_interaction_state()
         if enabled:
@@ -867,7 +868,45 @@ class Canvas(QtWidgets.QWidget):
         return None
 
     def _quick_edit_rectangles(self) -> list[Shape]:
-        return [shape for shape in self.shapes if shape.shape_type == "rectangle"]
+        indices = [
+            index
+            for index, shape in enumerate(self.shapes)
+            if shape.shape_type == "rectangle"
+        ]
+        if set(self._quick_edit_order) != set(indices):
+            centers = {
+                index: self.shapes[index].points.mean(axis=0)
+                if len(self.shapes[index].points)
+                else np.zeros(2)
+                for index in indices
+            }
+            # Start at the topmost box (leftmost on a tie), then visit the
+            # nearest remaining center. Keep the route stable as boxes move.
+            remaining = sorted(
+                indices, key=lambda index: (centers[index][1], centers[index][0], index)
+            )
+            order: list[int] = []
+            while remaining:
+                if not order:
+                    closest = remaining[0]
+                else:
+                    center = centers[order[-1]]
+                    closest = min(
+                        remaining,
+                        key=lambda index: (
+                            float(np.sum((centers[index] - center) ** 2)),
+                            centers[index][1],
+                            centers[index][0],
+                            index,
+                        ),
+                    )
+                order.append(closest)
+                remaining.remove(closest)
+            # Store indices so undo's replacement Shape copies retain the route,
+            # without changing annotation order in self.shapes or saved JSON.
+            self._quick_edit_order = order
+            self._quick_edit_index = min(self._quick_edit_index, len(order))
+        return [self.shapes[index] for index in self._quick_edit_order]
 
     def _select_quick_edit_rectangle(self) -> None:
         rectangles = self._quick_edit_rectangles()
@@ -3072,6 +3111,7 @@ class Canvas(QtWidgets.QWidget):
         self._quick_class_pressed_shape: Shape | None = None
         self._bounding_box_quick_edit = False
         self._quick_edit_index = 0
+        self._quick_edit_order: list[int] = []
         self._quick_edit_corner: QPointF | None = None
         self._release_cursor()
         self.pixmap = QtGui.QPixmap()

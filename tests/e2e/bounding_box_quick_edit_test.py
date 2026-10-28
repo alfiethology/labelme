@@ -358,3 +358,89 @@ def test_shift_tab_navigation_on_unchanged_boxes_stays_clean(
     assert canvas.selected_shapes == [first]
     assert not win._is_changed
     assert len(canvas.shape_backups) == history_size
+
+
+def test_quick_edit_visits_nearby_boxes_and_keeps_route_after_edits_and_undo(
+    quick_edit_win: MainWindow,
+    qtbot: QtBot,
+) -> None:
+    win = quick_edit_win
+    canvas = win._canvas_widgets.canvas
+    # File order deliberately jumps between opposite sides of the image.
+    centers = [
+        ("far_top", 80, 10),
+        ("start", 10, 10),
+        ("far_bottom", 80, 20),
+        ("near_bottom", 20, 20),
+        ("near_top", 20, 10),
+    ]
+    win._docks.label_list.clear()
+    win._load_shapes(
+        [
+            Shape(
+                label=label,
+                shape_type="rectangle",
+                points=np.array([[x - 3.0, y - 3.0], [x + 3.0, y + 3.0]]),
+            )
+            for label, x, y in centers
+        ]
+    )
+    win._toggle_bounding_box_quick_edit(True)
+    original_shapes = list(canvas.shapes)
+    assert canvas.selected_shapes[0].label == "start"
+    # Moving the first box to the other side must not change the planned route.
+    click_canvas_fraction(qtbot, canvas, (0.85, 0.85))
+    click_canvas_fraction(qtbot, canvas, (0.95, 0.95))
+    assert canvas.selected_shapes[0].label == "near_top"
+    win.undo_shape_edit()
+    assert canvas.selected_shapes[0].label == "near_top"
+    # Undo replaces the Shape objects, but navigation still uses the same route.
+    assert canvas.shapes[1] is not original_shapes[1]
+    seen = [canvas.selected_shapes[0].label]
+    for _ in range(3):
+        qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+        seen.append(canvas.selected_shapes[0].label)
+    assert seen == ["near_top", "near_bottom", "far_bottom", "far_top"]
+    for expected in reversed(["start", *seen[:-1]]):
+        qtbot.keyClick(canvas, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+        assert canvas.selected_shapes[0].label == expected
+    # Returning to the start allows editing it again without rearranging JSON.
+    click_canvas_fraction(qtbot, canvas, (0.85, 0.85))
+    click_canvas_fraction(qtbot, canvas, (0.95, 0.95))
+    path = Path(win._image_path)
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    saved = json.loads(path.with_suffix(".json").read_text())["shapes"]
+    assert [shape["label"] for shape in saved] == [label for label, _, _ in centers]
+    np.testing.assert_allclose(saved[1]["points"], [[85, 85], [95, 95]], atol=1)
+
+
+def test_nearby_order_is_deterministic_when_box_centres_tie(
+    quick_edit_win: MainWindow,
+    qtbot: QtBot,
+) -> None:
+    win = quick_edit_win
+    canvas = win._canvas_widgets.canvas
+    win._docks.label_list.clear()
+    win._load_shapes(
+        [
+            Shape(
+                label=label,
+                shape_type="rectangle",
+                points=np.array(points, dtype=float),
+            )
+            for label, points in [
+                ("right", [[55, 5], [65, 15]]),
+                ("left", [[35, 5], [45, 15]]),
+                ("left_duplicate", [[35, 5], [45, 15]]),
+            ]
+        ]
+    )
+    win._toggle_bounding_box_quick_edit(True)
+    assert canvas.selected_shapes[0].label == "left"
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    assert canvas.selected_shapes[0].label == "left_duplicate"
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    assert canvas.selected_shapes[0].label == "right"
+    win._toggle_bounding_box_quick_edit(False)
+    win._toggle_bounding_box_quick_edit(True)
+    assert canvas.selected_shapes[0].label == "left"

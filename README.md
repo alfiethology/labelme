@@ -442,6 +442,10 @@ Press **Escape** on the canvas, or uncheck the tool, to exit the mode. Ordinary
 Undo can revert an individual name change.
 
 Choose **Tools > Bounding Box Shape Quick Edit** to correct existing rectangles.
+Boxes are visited spatially: start at the topmost box (leftmost if tied), then
+select the nearest remaining box by its centre. This route stays fixed while
+you edit, so **Tab** and **Shift+Tab** follow a predictable order. Each image
+gets its own route; the order of shapes in saved annotations stays unchanged.
 The first box is selected automatically and shown with a thin, dashed outline
 and no fill so the animal remains visible. Click its new first corner, then its
 opposite corner; dotted crosshairs and a preview guide the replacement.
