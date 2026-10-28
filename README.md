@@ -448,8 +448,11 @@ you edit, so **Tab** and **Shift+Tab** follow a predictable order. Each image
 gets its own route; the order of shapes in saved annotations stays unchanged.
 The first box is selected automatically and shown with a thin, dashed outline
 and no fill so the animal remains visible. Other rectangles, including their
-labels, corner handles, and centre dots, are hidden until selected. They reappear
-when you exit Quick Edit. Click the selected box's new first corner, then its
+labels, corner handles, and centre dots, are hidden until selected during the
+first pass. Editing or pressing **Tab** on the last box makes all boxes reappear
+for review. **Shift+Tab** then revisits them with the selected box dotted while
+the others remain visible. Exiting Quick Edit also restores their display.
+Click the selected box's new first corner, then its
 opposite corner; dotted crosshairs and a preview guide the replacement.
 The next rectangle is selected automatically, skipping other shape types.
 Press **Tab** on the canvas to leave the selected box unchanged and select the

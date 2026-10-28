@@ -446,7 +446,7 @@ def test_nearby_order_is_deterministic_when_box_centres_tie(
     assert canvas.selected_shapes[0].label == "left"
 
 
-def test_only_current_box_is_drawn_and_other_boxes_return_on_exit(
+def test_other_boxes_are_hidden_during_first_pass_and_return_for_review(
     quick_edit_win: MainWindow,
     qtbot: QtBot,
 ) -> None:
@@ -488,13 +488,20 @@ def test_only_current_box_is_drawn_and_other_boxes_return_on_exit(
     assert image.pixelColor(50, 50) != background
     qtbot.keyClick(canvas, Qt.Key.Key_Tab)
     image = render()
-    assert all(
-        image.pixelColor(x, y) == background
-        for x in range(image.width())
-        for y in range(image.height())
-    )
+    assert image.pixelColor(20, 20) != background
+    assert image.pixelColor(50, 50) != background
     qtbot.keyClick(canvas, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
-    assert render().pixelColor(50, 50) != background
+    review = render()
+    assert review.pixelColor(20, 20) != background
+    assert review.pixelColor(50, 50) != background
+    assert (
+        canvas._render_context(second, highlighted=False).line_style
+        == Qt.PenStyle.DashLine
+    )
+    assert (
+        canvas._render_context(first, highlighted=False).line_style
+        == Qt.PenStyle.SolidLine
+    )
     qtbot.keyClick(canvas, Qt.Key.Key_Escape)
     restored = render()
     assert restored.pixelColor(20, 20) != background
@@ -505,3 +512,62 @@ def test_only_current_box_is_drawn_and_other_boxes_return_on_exit(
     assert len(canvas.shape_backups) == history_size
     for shape, original in zip(canvas.shapes, original_points, strict=True):
         np.testing.assert_array_equal(shape.points, original)
+
+
+@pytest.mark.parametrize("finish_with_tab", [False, True])
+def test_finishing_last_box_shows_all_and_next_image_starts_with_one_box(
+    quick_edit_win: MainWindow,
+    qtbot: QtBot,
+    finish_with_tab: bool,
+) -> None:
+    win = quick_edit_win
+    canvas = win._canvas_widgets.canvas
+    first, _, second = canvas.shapes
+    path = Path(win._image_path)
+    # The next image has the same boxes, so review state must reset per image.
+    path.with_name("b.json").write_text(
+        json.dumps(
+            {
+                "version": "6.3.1",
+                "flags": {},
+                "imagePath": "b.png",
+                "imageData": None,
+                "imageHeight": 100,
+                "imageWidth": 100,
+                "shapes": [
+                    {
+                        "label": shape.label,
+                        "points": shape.points.tolist(),
+                        "shape_type": shape.shape_type,
+                        "flags": shape.flags,
+                    }
+                    for shape in canvas.shapes
+                ],
+            }
+        )
+    )
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    assert canvas.selected_shapes == [second]
+    assert not canvas._should_render_shape(first)
+    if finish_with_tab:
+        qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    else:
+        click_canvas_fraction(qtbot, canvas, (0.4, 0.4))
+        click_canvas_fraction(qtbot, canvas, (0.7, 0.7))
+    assert canvas.selected_shapes == []
+    assert canvas._should_render_shape(first)
+    assert canvas._should_render_shape(second)
+    assert Path(win._image_path) == path
+    # Revisiting keeps the overview, including after another completed edit.
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+    assert canvas.selected_shapes == [second]
+    assert canvas._should_render_shape(first)
+    click_canvas_fraction(qtbot, canvas, (0.4, 0.4))
+    click_canvas_fraction(qtbot, canvas, (0.8, 0.8))
+    assert canvas._should_render_shape(first)
+    assert canvas._should_render_shape(second)
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    assert Path(win._image_path).name == "b.png"
+    assert canvas.selected_shapes == [canvas.shapes[0]]
+    assert canvas._should_render_shape(canvas.shapes[0])
+    assert not canvas._should_render_shape(canvas.shapes[2])

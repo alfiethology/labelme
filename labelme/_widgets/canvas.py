@@ -817,6 +817,7 @@ class Canvas(QtWidgets.QWidget):
         self._bounding_box_quick_edit = enabled
         self._quick_edit_index = 0
         self._quick_edit_order = []
+        self._quick_edit_review_complete = False
         self._quick_edit_corner = None
         self._reset_interaction_state()
         if enabled:
@@ -874,6 +875,7 @@ class Canvas(QtWidgets.QWidget):
             if shape.shape_type == "rectangle"
         ]
         if set(self._quick_edit_order) != set(indices):
+            self._quick_edit_review_complete = False
             centers = {
                 index: self.shapes[index].points.mean(axis=0)
                 if len(self.shapes[index].points)
@@ -910,6 +912,8 @@ class Canvas(QtWidgets.QWidget):
 
     def _select_quick_edit_rectangle(self) -> None:
         rectangles = self._quick_edit_rectangles()
+        if rectangles and self._quick_edit_index >= len(rectangles):
+            self._quick_edit_review_complete = True
         selected = rectangles[self._quick_edit_index : self._quick_edit_index + 1]
         for shape in selected:
             shape.visible = True
@@ -1033,7 +1037,11 @@ class Canvas(QtWidgets.QWidget):
         if self._bounding_box_quick_edit:
             count = len(self._quick_edit_rectangles())
             if self._quick_edit_index >= count:
-                prompt = self.tr("No rectangles left to edit")
+                prompt = (
+                    self.tr("All boxes reviewed; Shift+Tab to revisit")
+                    if count
+                    else self.tr("No rectangles to edit")
+                )
             else:
                 corner = (
                     self.tr("top left")
@@ -2678,6 +2686,7 @@ class Canvas(QtWidgets.QWidget):
     def _should_render_shape(self, shape: Shape) -> bool:
         return shape.visible and not (
             self._bounding_box_quick_edit
+            and not self._quick_edit_review_complete
             and shape.shape_type == "rectangle"
             and shape not in self.selected_shapes
         )
@@ -3119,6 +3128,7 @@ class Canvas(QtWidgets.QWidget):
         self._bounding_box_quick_edit = False
         self._quick_edit_index = 0
         self._quick_edit_order: list[int] = []
+        self._quick_edit_review_complete = False
         self._quick_edit_corner: QPointF | None = None
         self._release_cursor()
         self.pixmap = QtGui.QPixmap()

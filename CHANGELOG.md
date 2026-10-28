@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Bounding Box Shape Quick Edit now shows all boxes after editing or skipping the last box; Shift+Tab revisits them with the active box dotted and the others still visible.
+
 - Bounding Box Shape Quick Edit now hides inactive rectangles, including their labels, handles, and centre dots, while preserving them in saved annotations and restoring their display when the tool exits.
 
 - Bounding Box Shape Quick Edit now starts at the topmost box and visits nearby boxes by centre distance, keeping a stable spatial route for Tab and Shift+Tab without changing saved annotation order.
