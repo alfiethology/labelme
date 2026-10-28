@@ -1428,6 +1428,7 @@ class MainWindow(QtWidgets.QMainWindow):
             for row in range(label_list.count())
         )
         dialog = QuickDrawDialog(self, labels=suggestions)
+        dialog.restore_settings(self._window_state)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         if not dialog.is_valid():
@@ -1461,6 +1462,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._toggle_class_name_quick_edit(False)
         self.toggle_zoom_rect(False)
         self.mark_clean()  # _can_continue has saved or authorized discarding changes.
+        dialog.save_settings(self._window_state)
         self._quick_draw = _QuickDrawSession(
             labels=labels,
             remaining=remaining,
@@ -3113,8 +3115,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._default_state = self.saveState()
         #
         # XXX: Could be completely declarative.
-        # Restore the window geometry and dock layout (separate from the user
-        # Config; this Qt store holds only window state).
+        # Restore UI layout and workflow preferences separately from the user
+        # Config File.
         self._window_state = QtCore.QSettings("labelme", "labelme")
         self._recent_skeleton_template_paths = _normalize_recent_skeleton_paths(
             self._window_state.value("pose/recentSkeletonTemplates", [])

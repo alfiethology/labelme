@@ -52,9 +52,9 @@ def _configure(
     shape_type: str = "rectangle",
 ) -> None:
     def configure(dialog: QuickDrawDialog) -> int:
+        dialog.table.setColumnCount(0)
         for row, label in enumerate(labels):
-            if row:
-                dialog.add_class()
+            dialog.add_class()
             item = dialog.table.item(0, row)
             assert item is not None
             item.setText(label)
@@ -920,3 +920,74 @@ def test_clicking_visited_image_then_restarting_resumes_from_it(
     qtbot.keyClick(canvas, Qt.Key.Key_Space)
     assert win._quick_draw is None
     assert len(json.loads(_path(win).with_name("b.json").read_text())["shapes"]) == 2
+
+
+@pytest.mark.parametrize("classes", [("rat",), ("rat", "rat", "mouse")])
+@pytest.mark.parametrize("shape_type", ["rectangle", "polygon"])
+@pytest.mark.parametrize("random_images", [False, True])
+def test_quick_draw_remembers_last_started_settings_after_reopening_and_restart(
+    main_win: MainWinFactory,
+    qtbot: QtBot,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    shape_type: str,
+    random_images: bool,
+    classes: tuple[str, ...],
+) -> None:
+    Image.new("RGB", (100, 100)).save(tmp_path / "a.png")
+    win = main_win(file_or_dir=tmp_path)
+    show_window_and_wait_for_imagedata(qtbot, win)
+
+    def configure(dialog: QuickDrawDialog) -> int:
+        for column, label in enumerate(classes):
+            if column:
+                dialog.add_class()
+            dialog.table.item(0, column).setText(label)
+        dialog.shape_type.setCurrentIndex(dialog.shape_type.findData(shape_type))
+        dialog.random_images.setChecked(random_images)
+        return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QuickDrawDialog, "exec", configure)
+    win._toggle_quick_draw(True)
+    qtbot.keyClick(win._canvas_widgets.canvas, Qt.Key.Key_Escape)
+    inspected = []
+
+    def inspect_then_cancel(dialog: QuickDrawDialog) -> int:
+        assert dialog.label_sequence() == classes
+        assert dialog.shape_type.currentData() == shape_type
+        assert dialog.random_images.isChecked() == random_images
+        assert dialog.start_button.isEnabled()
+        inspected.append(True)
+        # Changes cancelled here must not replace the last started settings.
+        dialog.table.item(0, 0).setText("cancelled")
+        dialog.shape_type.setCurrentIndex(1 - dialog.shape_type.currentIndex())
+        dialog.random_images.setChecked(not random_images)
+        return QtWidgets.QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(QuickDrawDialog, "exec", inspect_then_cancel)
+    win._toggle_quick_draw(True)
+    win.close()
+    reopened = main_win(file_or_dir=tmp_path)
+    show_window_and_wait_for_imagedata(qtbot, reopened)
+    reopened._toggle_quick_draw(True)
+    assert len(inspected) == 2
+
+
+@pytest.mark.parametrize("classes", [[], [""], ["rat"] * 10, [12]])
+def test_invalid_remembered_classes_fall_back_to_empty_setup(
+    quick_draw_win: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+    classes: list,
+) -> None:
+    win = quick_draw_win
+    win._window_state.setValue("quickDraw/classes", classes)
+    win._window_state.setValue("quickDraw/shapeType", "unsupported")
+
+    def inspect(dialog: QuickDrawDialog) -> int:
+        assert dialog.shape_type.currentData() == "rectangle"
+        assert dialog.label_sequence() == ("",)
+        assert not dialog.start_button.isEnabled()
+        return QtWidgets.QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(QuickDrawDialog, "exec", inspect)
+    win._toggle_quick_draw(True)

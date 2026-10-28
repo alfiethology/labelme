@@ -118,6 +118,37 @@ class QuickDrawDialog(QtWidgets.QDialog):
         layout.addWidget(buttons)
         self.add_class()
 
+    def restore_settings(self, settings: QtCore.QSettings) -> None:
+        shape_type = settings.value("quickDraw/shapeType", "rectangle")
+        index = self.shape_type.findData(shape_type)
+        if index >= 0:
+            self.shape_type.setCurrentIndex(index)
+        random_images = settings.value("quickDraw/randomImages", False)
+        self.random_images.setChecked(
+            random_images is True
+            or (isinstance(random_images, str) and random_images.lower() == "true")
+        )
+        classes = settings.value("quickDraw/classes", [])
+        if isinstance(classes, str):
+            classes = [classes]
+        if (
+            isinstance(classes, list | tuple)
+            and 1 <= len(classes) <= 9
+            and all(isinstance(label, str) and label.strip() for label in classes)
+        ):
+            blocker = QtCore.QSignalBlocker(self.table)
+            self.table.setColumnCount(0)
+            for label in classes:
+                self.add_class()
+                self.table.item(0, self.table.columnCount() - 1).setText(label)
+            del blocker
+            self._update_validation()
+
+    def save_settings(self, settings: QtCore.QSettings) -> None:
+        settings.setValue("quickDraw/shapeType", self.shape_type.currentData())
+        settings.setValue("quickDraw/classes", list(self.label_sequence()))
+        settings.setValue("quickDraw/randomImages", self.random_images.isChecked())
+
     def add_class(self) -> None:
         column = self.table.columnCount()
         if column >= 9:

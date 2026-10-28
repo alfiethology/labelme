@@ -537,6 +537,9 @@ Shapes receive classes from left to right in drawing order, repeating the
 sequence as needed and restarting on each image. Draw boxes with two corner
 clicks; draw polygon vertices and press **Enter** or click the first vertex to
 close the polygon. No class prompt appears after drawing.
+The popup remembers the shape type, ordered classes, and random-selection option
+from the last run you started, including after restarting Labelme. Cancelling
+the popup leaves those remembered settings unchanged.
 
 Quick Draw can add missing rats or other objects to images that already have
 annotations. Existing shapes and image metadata are preserved; only shapes you
