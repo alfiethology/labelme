@@ -538,8 +538,13 @@ sequence as needed and restarting on each image. Draw boxes with two corner
 clicks; draw polygon vertices and press **Enter** or click the first vertex to
 close the polygon. No class prompt appears after drawing.
 
-Quick Draw visits unannotated images in the current File List order. Tick
-**Choose images randomly** to opt into random selection. The status bar shows
+Quick Draw can add missing rats or other objects to images that already have
+annotations. Existing shapes and image metadata are preserved; only shapes you
+add during this run count toward the automatic class sequence.
+
+Quick Draw starts at the selected image and continues down the current File List,
+without wrapping to the top. Tick **Choose images randomly** to choose from the
+whole File List in random order instead. The status bar shows
 which object to draw next. Labels are assigned automatically. Images only advance
 when you press **Space**. JSONs go beside their images, or into the annotation
 directory configured with **File > Change Output Dir**.
@@ -550,13 +555,16 @@ directory configured with **File > Change Output Dir**.
   class keys are ignored while a new shape is unfinished.
 - **Space** saves completed shapes and advances. With no shapes, it skips the
   image without creating an empty JSON. An unfinished shape is discarded.
-- **E** selects the latest shape for editing. Move it or drag a vertex/corner;
-  drawing resumes as soon as that edit is finished.
+- **E** selects the latest shape added during Quick Draw for editing. Move it
+  or drag a vertex/corner; drawing resumes as soon as that edit is finished.
+  Before adding a shape, E and the class number keys leave existing shapes alone.
 - **Escape**, or unchecking **Tools > Quick Draw…**, stops the run. Completed
   shapes on the current image remain available to save or undo normally.
-- Each image is visited at most once per run, including skipped images. Starting
-  another run makes skipped images available again. Existing JSONs, including
-  empty annotation files, are left alone.
+- Each image is visited at most once per run, including skipped images. To
+  revisit an image, click it in File List; this exits Quick Draw. Start Quick Draw
+  again to resume from that image, including images you previously saved.
+- **Space** on an unchanged annotated image moves on without rewriting its JSON.
+  Saving after adding shapes writes both the existing and new shapes.
 
 The run stops when no eligible images remain. A failed save keeps the current
 image open; press Space to retry. Selecting another image or drawing mode also

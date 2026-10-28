@@ -69,7 +69,9 @@ class QuickDrawDialog(QtWidgets.QDialog):
                 "After drawing a shape, press its class key (1–9) to change its class. "
                 "Space saves and moves on, or skips an empty image. "
                 "E edits the latest shape once, then resumes drawing. "
-                "Escape stops Quick Draw.\n"
+                "Escape stops Quick Draw. Existing annotations are kept; "
+                "each image is visited once per run. Start at the selected image "
+                "and continue down the list, or enable random selection.\n"
                 "JSONs are saved beside the images, or in your configured "
                 "annotation directory."
             )

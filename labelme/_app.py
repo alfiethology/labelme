@@ -117,6 +117,7 @@ class _QuickDrawSession:
     random_images: bool = False
     loading: bool = False
     editing: bool = False
+    existing_shape_count: int = 0
 
     def label_for(self, index: int) -> str:
         return self.labels[index % len(self.labels)]
@@ -1130,7 +1131,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._toggle_quick_draw,
             checkable=True,
             tip=self.tr(
-                "Draw named bounding boxes on random unannotated images; "
+                "Add named boxes or polygons to images, preserving existing shapes; "
                 "Space saves and moves on, Escape stops"
             ),
         )
@@ -1443,12 +1444,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
         if not self._can_continue():
             return
+        random_images = dialog.random_images.isChecked()
+        start_row = 0 if random_images else max(0, self._docks.file_list.currentRow())
         remaining = [
-            path for path in self.image_list if self._quick_draw_eligible(path)
+            path
+            for path in self.image_list[start_row:]
+            if self._quick_draw_eligible(path)
         ]
         if not remaining:
             self.show_status_message(
-                self.tr("Quick Draw: no unannotated images in the current set."), 5000
+                self.tr("Quick Draw: no available images in the current set."), 5000
             )
             return
         self._stop_change_labels()
@@ -1460,31 +1465,20 @@ class MainWindow(QtWidgets.QMainWindow):
             labels=labels,
             remaining=remaining,
             shape_type=dialog.shape_type.currentData(),
-            random_images=dialog.random_images.isChecked(),
+            random_images=random_images,
         )
         self._quick_draw_action.setChecked(True)
         self._open_next_quick_draw_image()
 
     def _quick_draw_eligible(self, path: str) -> bool:
-        # Protect annotations in either the configured directory or beside the
-        # image. Even an empty JSON represents an already reviewed image.
-        return (
-            Path(path).is_file()
-            and not Path(path).with_suffix(LABEL_FILE_SUFFIX).exists()
-            and not Path(
-                _resolve_label_path(
-                    image_or_label_path=path, output_dir=self._output_dir
-                )
-            ).exists()
-            and not (path == self._image_path and self._canvas_widgets.canvas.shapes)
-        )
+        return Path(path).is_file()
 
     def _open_next_quick_draw_image(self) -> None:
         session = self._quick_draw
         if session is None:
             return
-        # Recheck candidates at each advance: files may have been annotated or
-        # removed since setup. Each candidate is visited at most once per run.
+        # Recheck candidates at each advance: files may have been removed since
+        # setup. Removing each candidate from the queue prevents revisits.
         current_set = set(self.image_list)
         while session.remaining:
             path = (
@@ -1498,7 +1492,7 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self._stop_quick_draw()
             self.show_status_message(
-                self.tr("Quick Draw complete: no unvisited unannotated images remain."),
+                self.tr("Quick Draw complete: no unvisited images remain."),
                 10000,
             )
             return
@@ -1508,15 +1502,15 @@ class MainWindow(QtWidgets.QMainWindow):
             self._load_file(image_or_label_path=path)
         finally:
             session.loading = False
-        if self._image_path != path or self._canvas_widgets.canvas.pixmap.isNull():
+        if (
+            self._image_path is None
+            or Path(self._image_path).resolve() != Path(path).resolve()
+            or self._canvas_widgets.canvas.pixmap.isNull()
+        ):
             self._stop_quick_draw()
             return
-        if self._canvas_widgets.canvas.shapes or self._label_file_path is not None:
-            # An annotation may have appeared after the eligibility check.
-            self._stop_quick_draw()
-            return
-        # A newly loaded, unannotated image has no shape history yet. Keep an
-        # empty snapshot so even the first completed box can be undone.
+        session.existing_shape_count = len(self._canvas_widgets.canvas.shapes)
+        # Keep the loaded annotations as the baseline for undoing added shapes.
         self._canvas_widgets.canvas.backup_shapes()
         self._switch_canvas_mode(
             edit=False, create_mode=session.shape_type, keep_quick_draw=True
@@ -1528,7 +1522,9 @@ class MainWindow(QtWidgets.QMainWindow):
         session = self._quick_draw
         if session is None:
             return
-        completed = len(self._canvas_widgets.canvas.shapes)
+        completed = max(
+            0, len(self._canvas_widgets.canvas.shapes) - session.existing_shape_count
+        )
         if session.editing:
             text = self.tr(
                 "Quick Draw: edit a shape once to resume drawing | "
@@ -1567,7 +1563,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _edit_quick_draw_shape(self) -> None:
         session = self._quick_draw
         canvas = self._canvas_widgets.canvas
-        if session is None or not canvas.shapes:
+        if session is None or len(canvas.shapes) <= session.existing_shape_count:
             return
         canvas._cancel_current_shape()
         session.editing = True
@@ -1591,7 +1587,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if (
             session is None
             or index >= len(session.labels)
-            or not canvas.shapes
+            or len(canvas.shapes) <= session.existing_shape_count
             or canvas.is_drawing
         ):
             return
@@ -4466,7 +4462,11 @@ class MainWindow(QtWidgets.QMainWindow):
         description = ""
         quick_draw = self._quick_draw
         if quick_draw is not None:
-            index = len(self._canvas_widgets.canvas.shapes) - 1
+            index = (
+                len(self._canvas_widgets.canvas.shapes)
+                - 1
+                - quick_draw.existing_shape_count
+            )
             text = quick_draw.label_for(index)
             flags = {
                 key: False

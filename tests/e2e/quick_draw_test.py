@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -62,6 +63,35 @@ def _configure(
         return QtWidgets.QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(QuickDrawDialog, "exec", configure)
+
+
+def _write_existing_annotation(image: Path, *, label_path: Path | None = None) -> dict:
+    data = {
+        "version": "6.3.1",
+        "flags": {"reviewed": True},
+        "imagePath": image.name,
+        "imageData": None,
+        "imageHeight": 100,
+        "imageWidth": 100,
+        "shapes": [
+            {
+                "label": "existing_rat",
+                "points": [[10, 10], [30, 30]],
+                "shape_type": "rectangle",
+                "group_id": 7,
+                "description": "keep this rat",
+                "flags": {"occluded": True},
+                "rat_id": "original",
+            }
+        ],
+        "dataset_note": "keep image metadata",
+    }
+    target = label_path or image.with_suffix(".json")
+    if target.parent != image.parent:
+        data["imagePath"] = os.path.relpath(image, target.parent)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(data))
+    return data
 
 
 def _path(win: MainWindow) -> Path:
@@ -131,26 +161,31 @@ def test_space_saves_partial_and_skips_empty_without_revisiting(
     assert win._quick_draw is None
     assert not win._quick_draw_action.isChecked()
     assert not (folder / "a.json").exists()
-    # Skips are eligible again in a fresh run; c's saved annotation is protected.
+    # A fresh run includes saved images too, preserving their previous shapes.
     win._toggle_quick_draw(True)
-    assert _path(win).name == "b.png"
+    assert _path(win).name == "c.png"
+    assert len(canvas.shapes) == 1
 
 
-def test_existing_jsons_and_annotations_created_during_run_are_protected(
+def test_existing_annotations_and_jsons_created_during_run_are_loaded(
     quick_draw_win: MainWindow, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     win = quick_draw_win
     _configure(monkeypatch)
     folder = _path(win).parent
-    # Any existing JSON, even empty or malformed, excludes the image.
-    (folder / "c.json").write_text("already reviewed")
+    _write_existing_annotation(folder / "c.png")
     win._toggle_quick_draw(True)
-    assert _path(win).name == "b.png"
-    (folder / "a.json").write_text("new annotations from another process")
+    assert _path(win).name == "c.png"
+    assert win._canvas_widgets.canvas.shapes[0].label == "existing_rat"
+    data = _write_existing_annotation(folder / "b.png")
+    before = (folder / "b.json").read_bytes()
     qtbot.keyClick(win._canvas_widgets.canvas, Qt.Key.Key_Space)
-    assert win._quick_draw is None
-    assert (folder / "c.json").read_text() == "already reviewed"
-    assert (folder / "a.json").read_text() == "new annotations from another process"
+    assert _path(win).name == "b.png"
+    assert win._canvas_widgets.canvas.shapes[0].label == "existing_rat"
+    qtbot.keyClick(win._canvas_widgets.canvas, Qt.Key.Key_Space)
+    assert _path(win).name == "a.png"
+    assert (folder / "b.json").read_bytes() == before
+    assert json.loads(before)["shapes"] == data["shapes"]
 
 
 def test_auto_save_is_deferred_and_keep_previous_does_not_copy_boxes(
@@ -302,6 +337,7 @@ def test_configured_annotation_directory_is_used(
     win = main_win(file_or_dir=images, output_dir=output)
     show_window_and_wait_for_imagedata(qtbot, win)
     _configure(monkeypatch, ("cat",))
+    monkeypatch.setattr("labelme._app.random.choice", lambda paths: paths[-1])
     win._toggle_quick_draw(True)
     original_path = _path(win)
     _box(win, qtbot)
@@ -310,7 +346,7 @@ def test_configured_annotation_directory_is_used(
     assert not original_path.with_suffix(".json").exists()
     qtbot.keyClick(win._canvas_widgets.canvas, Qt.Key.Key_Escape)
     win._toggle_quick_draw(True)
-    assert _path(win) != original_path
+    assert _path(win).resolve() == original_path.resolve()
 
 
 def test_dialog_names_validation_and_removal(qtbot: QtBot) -> None:
@@ -416,18 +452,24 @@ def test_cancel_unsaved_prompt_when_starting_preserves_boxes(
     win.mark_clean()
 
 
-def test_no_unannotated_images_leaves_current_image_open(
-    quick_draw_win: MainWindow, monkeypatch: pytest.MonkeyPatch
+def test_fully_annotated_folder_is_visited_once_and_skips_keep_jsons_unchanged(
+    quick_draw_win: MainWindow, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     win = quick_draw_win
     _configure(monkeypatch)
-    path = _path(win)
     for image in win.image_list:
-        Path(image).with_suffix(".json").write_text("already reviewed")
+        _write_existing_annotation(Path(image))
+    before = {
+        Path(image).with_suffix(".json"): Path(image).with_suffix(".json").read_bytes()
+        for image in win.image_list
+    }
     win._toggle_quick_draw(True)
+    for expected in ("c.png", "b.png", "a.png"):
+        assert _path(win).name == expected
+        assert win._quick_draw is not None
+        qtbot.keyClick(win._canvas_widgets.canvas, Qt.Key.Key_Space)
     assert win._quick_draw is None
-    assert _path(win) == path
-    assert not win._quick_draw_action.isChecked()
+    assert all(path.read_bytes() == data for path, data in before.items())
 
 
 def test_dialog_accepts_name_entered_through_table_editor(qtbot: QtBot) -> None:
@@ -721,3 +763,160 @@ def test_unassigned_class_key_does_nothing(
     assert canvas.shapes[-1].label == "cat"
     assert len(canvas.shape_backups) == before
     assert win._quick_draw is not None
+
+
+@pytest.mark.parametrize("shape_type", ["rectangle", "polygon"])
+@pytest.mark.parametrize("separate_output", [False, True])
+def test_quick_draw_adds_shapes_preserves_existing_metadata_and_resets_class_order(
+    main_win: MainWinFactory,
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    shape_type: str,
+    separate_output: bool,
+) -> None:
+    images = tmp_path / "images"
+    images.mkdir()
+    for name in ("a", "b"):
+        Image.new("RGB", (100, 100)).save(images / f"{name}.png")
+    output = tmp_path / "labels" if separate_output else images
+    old = _write_existing_annotation(images / "b.png", label_path=output / "b.json")
+    _write_existing_annotation(images / "a.png", label_path=output / "a.json")
+    win = main_win(
+        file_or_dir=images,
+        output_dir=output if separate_output else None,
+        config_overrides={"auto_save": False},
+    )
+    show_window_and_wait_for_imagedata(qtbot, win)
+    monkeypatch.setattr("labelme._app.random.choice", lambda paths: paths[-1])
+    monkeypatch.setattr(
+        win._label_dialog, "popup", lambda *args: pytest.fail("Label popup")
+    )
+    _configure(monkeypatch, ("cat", "dog"), shape_type)
+    win._toggle_quick_draw(True)
+    canvas = win._canvas_widgets.canvas
+    assert _path(win).resolve() == (images / "b.png").resolve()
+    assert "1 — cat" in win._quick_draw_progress.text()
+    # Before adding a shape, number keys and E must not alter an existing rat.
+    qtbot.keyClick(canvas, Qt.Key.Key_2)
+    qtbot.keyClick(canvas, Qt.Key.Key_E)
+    assert canvas.shapes[0].label == "existing_rat"
+    assert canvas.mode == _CanvasMode.CREATE
+
+    def draw() -> None:
+        if shape_type == "rectangle":
+            _box(win, qtbot)
+        else:
+            for xy in ((0.4, 0.4), (0.8, 0.4), (0.8, 0.8)):
+                click_canvas_fraction(qtbot, canvas, xy)
+            qtbot.keyClick(canvas, Qt.Key.Key_Return)
+
+    draw()
+    assert [s.label for s in canvas.shapes] == ["existing_rat", "cat"]
+    win.undo_shape_edit()
+    assert [s.label for s in canvas.shapes] == ["existing_rat"]
+    assert "1 — cat" in win._quick_draw_progress.text()
+    draw()
+    draw()
+    assert [s.label for s in canvas.shapes] == ["existing_rat", "cat", "dog"]
+    qtbot.keyClick(canvas, Qt.Key.Key_1)
+    assert canvas.shapes[-1].label == "cat"
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    saved = json.loads((output / "b.json").read_text())
+    assert len(saved["shapes"]) == 3
+    for key, value in old["shapes"][0].items():
+        assert saved["shapes"][0][key] == value
+    assert saved["flags"] == old["flags"]
+    assert saved["dataset_note"] == old["dataset_note"]
+    assert all(s["shape_type"] == shape_type for s in saved["shapes"][1:])
+    assert _path(win).resolve() == (images / "a.png").resolve()
+    assert "1 — cat" in win._quick_draw_progress.text()
+    draw()
+    assert canvas.shapes[-1].label == "cat"
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    assert win._quick_draw is None
+
+
+def test_malformed_existing_json_stops_quick_draw_without_overwriting(
+    quick_draw_win: MainWindow,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    win = quick_draw_win
+    _configure(monkeypatch)
+    path = _path(win).parent / "c.json"
+    path.write_text("invalid annotation")
+    errors = []
+    monkeypatch.setattr(
+        win, "_show_file_open_error", lambda **kwargs: errors.append(kwargs)
+    )
+    win._toggle_quick_draw(True)
+    assert win._quick_draw is None
+    assert errors
+    assert path.read_text() == "invalid annotation"
+
+
+@pytest.mark.parametrize("random_images", [False, True])
+def test_starting_from_selected_image_uses_remaining_list_or_random_whole_list(
+    quick_draw_win: MainWindow,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    random_images: bool,
+) -> None:
+    win = quick_draw_win
+    win._docks.file_list.setCurrentRow(1)
+    assert _path(win).name == "b.png"
+
+    def configure(dialog: QuickDrawDialog) -> int:
+        dialog.table.item(0, 0).setText("rat")
+        dialog.random_images.setChecked(random_images)
+        return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(QuickDrawDialog, "exec", configure)
+    win._toggle_quick_draw(True)
+    expected = ("c.png", "b.png", "a.png") if random_images else ("b.png", "c.png")
+    for name in expected:
+        assert _path(win).name == name
+        qtbot.keyClick(win._canvas_widgets.canvas, Qt.Key.Key_Space)
+    assert win._quick_draw is None
+
+
+def test_clicking_visited_image_then_restarting_resumes_from_it(
+    quick_draw_win: MainWindow,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    win = quick_draw_win
+    _configure(monkeypatch, ("rat",))
+    configure_random = QuickDrawDialog.exec
+
+    def configure(dialog: QuickDrawDialog) -> int:
+        result = configure_random(dialog)
+        dialog.random_images.setChecked(False)
+        return result
+
+    monkeypatch.setattr(QuickDrawDialog, "exec", configure)
+    win._docks.file_list.setCurrentRow(1)
+    win._toggle_quick_draw(True)
+    canvas = win._canvas_widgets.canvas
+    _box(win, qtbot)
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    assert _path(win).name == "c.png"
+    files = win._docks.file_list
+    qtbot.mouseClick(
+        files.viewport(),
+        Qt.MouseButton.LeftButton,
+        pos=files.visualItemRect(files.item(1)).center(),
+    )
+    assert _path(win).name == "b.png"
+    assert win._quick_draw is None
+    assert len(canvas.shapes) == 1
+    win._toggle_quick_draw(True)
+    assert _path(win).name == "b.png"
+    assert len(canvas.shapes) == 1
+    _box(win, qtbot)
+    assert len(canvas.shapes) == 2
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    assert _path(win).name == "c.png"
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    assert win._quick_draw is None
+    assert len(json.loads(_path(win).with_name("b.json").read_text())["shapes"]) == 2
