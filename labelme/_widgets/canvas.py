@@ -2644,7 +2644,7 @@ class Canvas(QtWidgets.QWidget):
             painter.setBrush(QtGui.QColor(210, 210, 0))
             radius = 2.5
             for shape in self.shapes:
-                if not shape.visible or shape.shape_type not in (
+                if not self._should_render_shape(shape) or shape.shape_type not in (
                     "rectangle",
                     "oriented_rectangle",
                     "polygon",
@@ -2675,9 +2675,16 @@ class Canvas(QtWidgets.QWidget):
             return False
         return not self._should_constrain_to_pixmap(cursor)
 
+    def _should_render_shape(self, shape: Shape) -> bool:
+        return shape.visible and not (
+            self._bounding_box_quick_edit
+            and shape.shape_type == "rectangle"
+            and shape not in self.selected_shapes
+        )
+
     def _draw_committed_shapes_layer(self, painter: QtGui.QPainter) -> None:
         for shape in self.shapes:
-            if not shape.visible:
+            if not self._should_render_shape(shape):
                 continue
             context = self._render_context(
                 shape=shape, highlighted=shape is self.hovered_shape

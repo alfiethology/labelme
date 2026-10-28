@@ -444,3 +444,64 @@ def test_nearby_order_is_deterministic_when_box_centres_tie(
     win._toggle_bounding_box_quick_edit(False)
     win._toggle_bounding_box_quick_edit(True)
     assert canvas.selected_shapes[0].label == "left"
+
+
+def test_only_current_box_is_drawn_and_other_boxes_return_on_exit(
+    quick_edit_win: MainWindow,
+    qtbot: QtBot,
+) -> None:
+    win = quick_edit_win
+    canvas = win._canvas_widgets.canvas
+    canvas.scale = 1.0
+    first, point, second = canvas.shapes
+    point.visible = False
+    canvas.set_show_labels(True)
+    canvas.set_show_center_dots(True)
+    background = QtGui.QColor(32, 48, 64)
+    original_points = [shape.points.copy() for shape in canvas.shapes]
+    history_size = len(canvas.shape_backups)
+
+    def render() -> QtGui.QImage:
+        image = QtGui.QImage(140, 100, QtGui.QImage.Format.Format_ARGB32)
+        image.fill(background)
+        painter = QtGui.QPainter(image)
+        try:
+            canvas._draw_committed_shapes_layer(painter)
+            canvas._draw_center_dots_layer(painter)
+        finally:
+            painter.end()
+        return image
+
+    image = render()
+    assert image.pixelColor(20, 20) != background  # Current box's centre dot.
+    # The other box's outline, handles, label, fill, and centre dot all disappear.
+    assert all(
+        image.pixelColor(x, y) == background
+        for x in range(35, 130)
+        for y in range(20, 68)
+    )
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    image = render()
+    assert image.pixelColor(20, 20) == background
+    assert image.pixelColor(10, 20) == background
+    assert image.pixelColor(10, 10) == background
+    assert image.pixelColor(50, 50) != background
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    image = render()
+    assert all(
+        image.pixelColor(x, y) == background
+        for x in range(image.width())
+        for y in range(image.height())
+    )
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+    assert render().pixelColor(50, 50) != background
+    qtbot.keyClick(canvas, Qt.Key.Key_Escape)
+    restored = render()
+    assert restored.pixelColor(20, 20) != background
+    assert restored.pixelColor(50, 50) != background
+    assert first.visible and second.visible
+    assert not point.visible
+    assert not win._is_changed
+    assert len(canvas.shape_backups) == history_size
+    for shape, original in zip(canvas.shapes, original_points, strict=True):
+        np.testing.assert_array_equal(shape.points, original)
