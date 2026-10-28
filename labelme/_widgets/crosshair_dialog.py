@@ -53,6 +53,7 @@ class CrosshairDialog(QtWidgets.QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.resize(self.sizeHint() * 1.5)
 
     def _choose_color(self) -> None:
         color = QtWidgets.QColorDialog.getColor(

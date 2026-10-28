@@ -37,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Increased the Crosshair Appearance dialog's initial width and height by 50%.
+
 - Increased the default cursor crosshair thickness from one pixel to two pixels for visibility.
 
 - The active box in Bounding Box Shape Quick Edit now uses a thin, dashed outline without fill to keep the animal visible while correcting its bounds.
