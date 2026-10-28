@@ -302,3 +302,59 @@ def test_active_box_is_thin_dashed_and_unfilled_until_skipped(
     normal = render(first)
     assert normal.pixelColor(int(20 * scale), int(20 * scale)) != background
     win.mark_clean()
+
+
+@pytest.mark.parametrize("key", [Qt.Key.Key_Tab, Qt.Key.Key_Backtab])
+def test_shift_tab_reselects_previous_box_without_reverting_edits(
+    quick_edit_win: MainWindow,
+    qtbot: QtBot,
+    key: Qt.Key,
+) -> None:
+    win = quick_edit_win
+    canvas = win._canvas_widgets.canvas
+    first, point, second = canvas.shapes
+    path = Path(win._image_path)
+    click_canvas_fraction(qtbot, canvas, (0.2, 0.2))
+    click_canvas_fraction(qtbot, canvas, (0.8, 0.8))
+    edited_points = first.points.copy()
+    history_size = len(canvas.shape_backups)
+    assert canvas.selected_shapes == [second]
+    # Going back cancels only this unfinished preview, not the first box's edit.
+    click_canvas_fraction(qtbot, canvas, (0.3, 0.3))
+    qtbot.keyClick(canvas, key, Qt.KeyboardModifier.ShiftModifier)
+    assert canvas.selected_shapes == [first]
+    assert canvas._quick_edit_corner is None
+    assert canvas.hasFocus()
+    assert len(canvas.shape_backups) == history_size
+    assert win._is_changed
+    np.testing.assert_array_equal(first.points, edited_points)
+    np.testing.assert_array_equal(point.points, [[50, 50]])
+    # At the first box, stay there rather than wrapping or opening another image.
+    qtbot.keyClick(canvas, key, Qt.KeyboardModifier.ShiftModifier)
+    assert canvas.selected_shapes == [first]
+    assert Path(win._image_path) == path
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    assert canvas.selected_shapes == []
+    qtbot.keyClick(canvas, key, Qt.KeyboardModifier.ShiftModifier)
+    assert canvas.selected_shapes == [second]
+    assert len(canvas.shape_backups) == history_size
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    assert Path(win._image_path).name == "b.png"
+    saved = json.loads(path.with_suffix(".json").read_text())["shapes"]
+    np.testing.assert_array_equal(saved[0]["points"], edited_points)
+
+
+def test_shift_tab_navigation_on_unchanged_boxes_stays_clean(
+    quick_edit_win: MainWindow,
+    qtbot: QtBot,
+) -> None:
+    win = quick_edit_win
+    canvas = win._canvas_widgets.canvas
+    first = canvas.shapes[0]
+    history_size = len(canvas.shape_backups)
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab, Qt.KeyboardModifier.ShiftModifier)
+    assert canvas.selected_shapes == [first]
+    assert not win._is_changed
+    assert len(canvas.shape_backups) == history_size

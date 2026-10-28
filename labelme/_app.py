@@ -1100,7 +1100,8 @@ class MainWindow(QtWidgets.QMainWindow):
             self._toggle_bounding_box_quick_edit,
             checkable=True,
             tip=self.tr(
-                "Reposition rectangles with two clicks; Tab skips a box; "
+                "Reposition rectangles with two clicks; "
+                "Tab skips a box, Shift+Tab selects the previous box; "
                 "Space saves and opens the next image"
             ),
         )
@@ -5676,13 +5677,30 @@ class MainWindow(QtWidgets.QMainWindow):
             and isinstance(event, QtGui.QKeyEvent)
             and event.type()
             in (QtCore.QEvent.Type.ShortcutOverride, QtCore.QEvent.Type.KeyPress)
-            and event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Escape, Qt.Key.Key_Tab)
-            and event.modifiers() == Qt.KeyboardModifier.NoModifier
+            and (
+                (
+                    event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Escape, Qt.Key.Key_Tab)
+                    and event.modifiers() == Qt.KeyboardModifier.NoModifier
+                )
+                or (
+                    event.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab)
+                    and event.modifiers() == Qt.KeyboardModifier.ShiftModifier
+                )
+                or (
+                    event.key() == Qt.Key.Key_Backtab
+                    and event.modifiers() == Qt.KeyboardModifier.NoModifier
+                )
+            )
         ):
             event.accept()
             if event.type() == QtCore.QEvent.Type.KeyPress and not event.isAutoRepeat():
                 if event.key() == Qt.Key.Key_Space:
                     self._advance_bounding_box_quick_edit_image()
+                elif event.key() == Qt.Key.Key_Backtab or (
+                    event.key() == Qt.Key.Key_Tab
+                    and event.modifiers() == Qt.KeyboardModifier.ShiftModifier
+                ):
+                    self._canvas_widgets.canvas.previous_quick_edit_rectangle()
                 elif event.key() == Qt.Key.Key_Tab:
                     self._canvas_widgets.canvas.skip_quick_edit_rectangle()
                 else:

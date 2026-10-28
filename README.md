@@ -450,6 +450,9 @@ Press **Tab** on the canvas to leave the selected box unchanged and select the
 next one. Tab also discards an unfinished first-corner preview. Skipping the last
 box keeps the current image open; **Space** remains the key to save and advance
 to the next image.
+Press **Shift+Tab** to select the previous box again, keeping all completed
+edits. It also works after the final box; at the first box it does nothing.
+Moving back discards only an unfinished first-corner preview.
 Class names and metadata stay unchanged. After the final box, the image stays
 open until you press **Space** to save and advance. **Ctrl+Z** undoes a correction;
 **Escape** exits and discards an unfinished two-click correction.

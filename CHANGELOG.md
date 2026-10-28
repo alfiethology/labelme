@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Shift+Tab in Bounding Box Shape Quick Edit to select the previous box without undoing completed edits.
+
 - Added Tools > Crosshair Appearance… and matching Settings controls for persistent crosshair colour and thickness, with thickness clamped to 1–5 screen pixels.
 
 - Added Tab to Bounding Box Shape Quick Edit to skip the current box without changing it; Space still saves and advances to the next image.
