@@ -24,6 +24,9 @@ from PySide6.QtCore import Qt
 from .. import _automation
 from .. import _shape
 from .. import _utils
+from .._config._crosshair import DEFAULT_CROSSHAIR_COLOR
+from .._config._crosshair import DEFAULT_CROSSHAIR_WIDTH
+from .._config._crosshair import clamp_crosshair_width
 from .._pose import ensure_skeleton_axis_aligned_bbox
 from .._pose import skeleton_shape_parts
 from .._shape import POLYLINE_SHAPE_TYPES
@@ -260,6 +263,12 @@ class Canvas(QtWidgets.QWidget):
                 "ai_points_to_shape": False,
                 "ai_box_to_shape": True,
             },
+        )
+        self._crosshair_color = QtGui.QColor(
+            *kwargs.pop("crosshair_color", DEFAULT_CROSSHAIR_COLOR)
+        )
+        self._crosshair_width = clamp_crosshair_width(
+            kwargs.pop("crosshair_width", DEFAULT_CROSSHAIR_WIDTH)
         )
         super().__init__(*args, **kwargs)
         self._left_button_held = False
@@ -2548,17 +2557,21 @@ class Canvas(QtWidgets.QWidget):
         painter.drawLine(QPointF(left, cy), QPointF(right, cy))
         painter.drawLine(QPointF(cx, top), QPointF(cx, bottom))
 
+    def set_crosshair_style(self, *, color: QtGui.QColor, width: int) -> None:
+        self._crosshair_color = QtGui.QColor(color)
+        self._crosshair_width = clamp_crosshair_width(width)
+        self.update()
+
     def _crosshair_pen(self) -> QtGui.QPen:
+        pen = QtGui.QPen(self._crosshair_color)
+        pen.setWidth(self._crosshair_width)
         if (
             self._bounding_box_quick_edit
             or (self.mode == _CanvasMode.CREATE and self.create_mode == "rectangle")
             or (self.is_drawing_skeleton and self._skeleton_drawing_mode == "bbox")
         ):
-            pen = QtGui.QPen(QtGui.QColor(255, 235, 0))
-            pen.setWidth(1)
             pen.setStyle(Qt.PenStyle.DotLine)
-            return pen
-        return QtGui.QPen(self.palette().color(QtGui.QPalette.ColorRole.WindowText))
+        return pen
 
     def _draw_quick_edit_preview_layer(self, painter: QtGui.QPainter) -> None:
         if not self._bounding_box_quick_edit or self._quick_edit_corner is None:

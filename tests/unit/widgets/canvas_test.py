@@ -535,7 +535,7 @@ def test_quick_skeleton_crosshair_appears_only_for_bounding_box(
 
 
 @pytest.mark.gui
-def test_quick_skeleton_bounding_box_crosshair_is_yellow_dotted_and_one_pixel(
+def test_quick_skeleton_bounding_box_crosshair_is_yellow_dotted_and_two_pixels(
     canvas: Canvas,
 ) -> None:
     canvas.start_skeleton_drawing(node_names=("snout",))
@@ -544,7 +544,7 @@ def test_quick_skeleton_bounding_box_crosshair_is_yellow_dotted_and_one_pixel(
     pen = canvas._crosshair_pen()
 
     assert pen.color() == QtGui.QColor(255, 235, 0)
-    assert pen.width() == 1
+    assert pen.width() == 2
     assert pen.style() == Qt.PenStyle.DotLine
 
 
@@ -1683,3 +1683,24 @@ def test_remove_selected_point_deselects_vertex(canvas: Canvas) -> None:
     assert len(shape.points) == 3  # the point was removed
     # Vertex is no longer selected, so the next move won't drag the neighbor (#968).
     assert not canvas._is_vertex_selected()
+
+
+@pytest.mark.parametrize("scale", [0.5, 1.0, 2.5])
+def test_crosshair_style_applies_to_cursor_guides_and_preview_at_any_zoom(
+    canvas: Canvas,
+    scale: float,
+) -> None:
+    canvas.scale = scale
+    canvas.set_crosshair_style(color=QtGui.QColor(40, 180, 230), width=30)
+    canvas.set_bounding_box_quick_edit(True)
+    pen = canvas._crosshair_pen()
+    assert pen.color() == QtGui.QColor(40, 180, 230)
+    assert pen.width() == 5
+    assert pen.style() == Qt.PenStyle.DotLine
+    canvas.set_crosshair_style(color=QtGui.QColor("red"), width=0)
+    assert canvas._crosshair_pen().width() == 1
+    canvas.set_bounding_box_quick_edit(False)
+    canvas.create_mode = "rectangle"
+    canvas.set_editing(False)
+    assert canvas._crosshair_pen().color() == QtGui.QColor("red")
+    assert canvas._crosshair_pen().width() == 1

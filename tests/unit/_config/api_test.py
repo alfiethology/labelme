@@ -599,3 +599,26 @@ def test_load_config_rejects_invalid_shape_color(
             config_file=None,
             config_overrides={"shape_color": shape_color},
         )
+
+
+@pytest.mark.parametrize(("width", "expected"), [(30, 5), (0, 1), (-10, 1), (4, 4)])
+def test_crosshair_width_is_clamped_for_files_and_overrides(
+    tmp_path: Path,
+    width: int,
+    expected: int,
+) -> None:
+    config_file = tmp_path / "labelmerc.yaml"
+    config_file.write_text(f"canvas:\n  crosshair_width: {width}\n")
+    assert _config.load_config(config_file, {})["canvas"]["crosshair_width"] == expected
+    assert (
+        _config.load_config(None, {"canvas": {"crosshair_width": width}})["canvas"][
+            "crosshair_width"
+        ]
+        == expected
+    )
+
+
+@pytest.mark.parametrize("width", [True, 1.5, "3", None])
+def test_crosshair_width_rejects_non_integer_config_values(width: object) -> None:
+    with pytest.raises(ValueError, match="crosshair_width must be an integer"):
+        _config.load_config(None, {"canvas": {"crosshair_width": width}})

@@ -84,6 +84,8 @@ canvas:
   num_backups: 10
   # allow annotation points to extend beyond the image boundary
   allow_out_of_bounds_points: false
+  crosshair_color: [255, 235, 0, 255]
+  crosshair_width: 2  # Screen pixels, clamped to 1–5.
   # show crosshair
   crosshair:
     polygon: false

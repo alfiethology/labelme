@@ -356,6 +356,15 @@ adjustments are remembered for the current Labelme session.
 
 ### Choose canvas and point colours
 
+Choose **Tools > Crosshair Appearance…** to change the cursor guide colour and
+thickness. The default is yellow at **2 screen pixels**. Thickness is limited to
+**1–5 pixels**; typing a larger number, such as 30, uses 5. The changes apply to
+crosshairs and the box preview, including Bounding Box Shape Quick Edit and
+skeleton box drawing, and are remembered between sessions. The same controls are
+in **Settings > Drawing and canvas**. Crosshair thickness stays constant as you
+zoom; the thin dashed outline of the existing box being corrected keeps its
+own style.
+
 In **Settings > Drawing and canvas**, choose **Point inner colour** and
 **Point outer ring colour** independently. The defaults are yellow and black.
 The inner colour controls points while drawing; once a shape has a label, its
@@ -435,7 +444,7 @@ Undo can revert an individual name change.
 Choose **Tools > Bounding Box Shape Quick Edit** to correct existing rectangles.
 The first box is selected automatically and shown with a thin, dashed outline
 and no fill so the animal remains visible. Click its new first corner, then its
-opposite corner; yellow dotted crosshairs and a preview guide the replacement.
+opposite corner; dotted crosshairs and a preview guide the replacement.
 The next rectangle is selected automatically, skipping other shape types.
 Press **Tab** on the canvas to leave the selected box unchanged and select the
 next one. Tab also discards an unfinished first-corner preview. Skipping the last

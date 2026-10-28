@@ -213,6 +213,21 @@ SETTINGS: Final[tuple[Setting, ...]] = (
         beta=True,
     ),
     Setting(
+        key_path=("canvas", "crosshair_color"),
+        group="Drawing and canvas",
+        label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Crosshair colour")),
+        kind="color",
+    ),
+    Setting(
+        key_path=("canvas", "crosshair_width"),
+        group="Drawing and canvas",
+        label=cast(
+            str, QT_TRANSLATE_NOOP("SettingsDialog", "Crosshair thickness (pixels)")
+        ),
+        kind="enum",
+        choices=(1, 2, 3, 4, 5),
+    ),
+    Setting(
         key_path=("shape", "vertex_fill_color"),
         group="Drawing and canvas",
         label=cast(str, QT_TRANSLATE_NOOP("SettingsDialog", "Point inner colour")),

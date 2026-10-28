@@ -40,6 +40,7 @@ from . import _automation
 from . import _config
 from . import _utils
 from ._config import _schema as config_schema
+from ._config._crosshair import clamp_crosshair_width
 from ._frame_refinement import FrameInferenceWorker
 from ._frame_refinement import FramePrediction
 from ._frame_refinement import VideoInferenceWorker
@@ -96,6 +97,7 @@ from ._widgets.class_name_quick_edit import ClassNameQuickEditPopup
 from ._widgets.command_palette import Command
 from ._widgets.command_palette import CommandPalette
 from ._widgets.command_palette import collect_action_commands
+from ._widgets.crosshair_dialog import CrosshairDialog
 from ._widgets.frame_extractor_dialog import FrameExtractorDialog
 from ._widgets.quick_draw_dialog import QuickDrawDialog
 from ._yolo_predictions import shapes_from_yolo_result
@@ -1146,6 +1148,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._class_name_quick_edit_action,
                 self._quick_draw_action,
                 self._full_screen_editor_action,
+                action(
+                    self.tr("Crosshair Appearance…"),
+                    self._choose_crosshair_appearance,
+                    tip=self.tr(
+                        "Change cursor crosshair colour and thickness (1–5 pixels)"
+                    ),
+                ),
                 action(
                     self.tr("Change Labels…"),
                     self._change_labels,
@@ -3192,6 +3201,8 @@ class MainWindow(QtWidgets.QMainWindow):
             double_click=self._config["canvas"]["double_click"],
             num_backups=self._config["canvas"]["num_backups"],
             crosshair=self._config["canvas"]["crosshair"],
+            crosshair_color=self._config["canvas"]["crosshair_color"],
+            crosshair_width=self._config["canvas"]["crosshair_width"],
             allow_out_of_bounds_points=self._config["canvas"][
                 "allow_out_of_bounds_points"
             ],
@@ -4900,6 +4911,27 @@ class MainWindow(QtWidgets.QMainWindow):
         available_w = self.centralWidget().width() - FIT_WIDTH_SCROLLBAR_MARGIN
         return available_w / self._canvas_widgets.canvas.pixmap.width()
 
+    def _choose_crosshair_appearance(self) -> None:
+        dialog = CrosshairDialog(
+            self,
+            color=QtGui.QColor(*self._config["canvas"]["crosshair_color"]),
+            width=self._config["canvas"]["crosshair_width"],
+        )
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        color = list(dialog.color_button.color.getRgb())
+        width = clamp_crosshair_width(dialog.width.value())
+        overrides = [
+            (("canvas", "crosshair_color"), color),
+            (("canvas", "crosshair_width"), width),
+        ]
+        if self._is_settings_editable and not self._try_set_overrides(overrides):
+            return
+        for key_path, value in overrides:
+            self._set_setting_value(key_path, value)
+            self._sync_setting_controls(key_path=key_path)
+        self._canvas_widgets.canvas.setFocus()
+
     def _toggle_full_screen_editor(self, enabled: bool) -> None:
         self._full_screen_editor_action.setChecked(enabled)
         if enabled:
@@ -5276,6 +5308,8 @@ class MainWindow(QtWidgets.QMainWindow):
         return node
 
     def _apply_setting_change(self, key_path: tuple[str, ...], value: object) -> bool:
+        if key_path == ("canvas", "crosshair_width"):
+            value = clamp_crosshair_width(value)
         if self._is_settings_editable and not self._try_set_overrides(
             overrides=[(key_path, value)]
         ):
@@ -5330,6 +5364,11 @@ class MainWindow(QtWidgets.QMainWindow):
             }
             if key_path in canvas_setters:
                 canvas_setters[key_path](value)
+        elif key_path in (("canvas", "crosshair_color"), ("canvas", "crosshair_width")):
+            self._canvas_widgets.canvas.set_crosshair_style(
+                color=QtGui.QColor(*self._config["canvas"]["crosshair_color"]),
+                width=self._config["canvas"]["crosshair_width"],
+            )
         elif key_path == ("canvas", "zoom_speed"):
             self._zoom_speed = self._config["canvas"]["zoom_speed"]
             for action in self._actions.zoom_speed_menu.actions():

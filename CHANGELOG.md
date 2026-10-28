@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Tools > Crosshair Appearance… and matching Settings controls for persistent crosshair colour and thickness, with thickness clamped to 1–5 screen pixels.
+
 - Added Tab to Bounding Box Shape Quick Edit to skip the current box without changing it; Space still saves and advances to the next image.
 
 - Added Tools > Full Screen Editor (F11) to fill the app window with the canvas by hiding all menus, toolbars, panels, and the status bar; F11 restores the previous layout without changing the window size.
@@ -34,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded the Settings dialog with a scrollable page of workflow-oriented groups, an icon-labeled section index for quick navigation, and explanatory descriptions, so that auto-save, saving image data, keep-previous annotation/zoom/brightness-contrast, fill-drawing, label sorting/completion/text-field behavior, and the default AI model can all be changed in-app with immediate apply, instead of requiring hand-editing the config file ([#2403](https://github.com/wkentaro/labelme/pull/2403))
 
 ### Changed
+
+- Increased the default cursor crosshair thickness from one pixel to two pixels for visibility.
 
 - The active box in Bounding Box Shape Quick Edit now uses a thin, dashed outline without fill to keep the animal visible while correcting its bounds.
 

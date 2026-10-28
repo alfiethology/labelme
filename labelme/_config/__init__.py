@@ -9,6 +9,7 @@ from typing import cast
 from loguru import logger
 
 from .. import _yaml
+from ._crosshair import clamp_crosshair_width
 from ._shape_color import migrate_shape_color
 from ._shape_color import validate_point_colors_by_label
 from ._shape_color import validate_shape_color
@@ -58,6 +59,8 @@ def _validate_config_item(key: str, value: object) -> None:
         or value not in (1, 2, 3, 4)
     ):
         raise ValueError("canvas.zoom_speed must be an integer from 1 to 4")
+    if key == "crosshair_width":
+        clamp_crosshair_width(value)
     if key == "point_colors_by_label":
         validate_point_colors_by_label(value)
     if key == "validate_label" and value not in [None, "exact"]:
@@ -278,4 +281,7 @@ def load_config(config_file: Path | None, config_overrides: dict) -> dict:
         raise ValueError("labels must be specified when validate_label is enabled")
     validate_shape_color(config=config["shape_color"])
 
+    config["canvas"]["crosshair_width"] = clamp_crosshair_width(
+        config["canvas"]["crosshair_width"]
+    )
     return config
