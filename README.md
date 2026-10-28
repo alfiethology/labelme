@@ -433,7 +433,8 @@ Press **Escape** on the canvas, or uncheck the tool, to exit the mode. Ordinary
 Undo can revert an individual name change.
 
 Choose **Tools > Bounding Box Shape Quick Edit** to correct existing rectangles.
-The first box is selected automatically. Click its new first corner, then its
+The first box is selected automatically and shown with a thin, dashed outline
+and no fill so the animal remains visible. Click its new first corner, then its
 opposite corner; yellow dotted crosshairs and a preview guide the replacement.
 The next rectangle is selected automatically, skipping other shape types.
 Press **Tab** on the canvas to leave the selected box unchanged and select the

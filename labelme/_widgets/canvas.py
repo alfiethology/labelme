@@ -462,7 +462,7 @@ class Canvas(QtWidgets.QWidget):
 
     def _render_context(self, shape: Shape, *, highlighted: bool) -> ShapeRenderContext:
         selected = shape in self.selected_shapes
-        return ShapeRenderContext(
+        context = ShapeRenderContext(
             scale=self.scale,
             palette=self._resolve_palette(shape.label),
             point_size=self._point_size,
@@ -475,6 +475,15 @@ class Canvas(QtWidgets.QWidget):
             skeleton_node_size=self._skeleton_node_size,
             skeleton_node_label_size=self._skeleton_node_label_size,
         )
+        if (
+            self._bounding_box_quick_edit
+            and selected
+            and shape.shape_type == "rectangle"
+        ):
+            return dataclasses.replace(
+                context, fill=False, line_width=1, line_style=Qt.PenStyle.DashLine
+            )
+        return context
 
     def _draft_render_context(
         self,

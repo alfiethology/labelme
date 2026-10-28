@@ -87,6 +87,8 @@ class ShapeRenderContext:
     show_label: bool = False
     skeleton_node_size: int = 8
     skeleton_node_label_size: int = SKELETON_NODE_LABEL_FONT_SIZE
+    line_width: int = PEN_WIDTH
+    line_style: QtCore.Qt.PenStyle = QtCore.Qt.PenStyle.SolidLine
 
 
 def render_shape(
@@ -98,7 +100,8 @@ def render_shape(
     palette = context.palette
     color = palette.select_line if context.selected else palette.line
     pen = QtGui.QPen(color)
-    pen.setWidth(PEN_WIDTH)
+    pen.setWidth(context.line_width)
+    pen.setStyle(context.line_style)
     painter.setPen(pen)
 
     if shape.shape_type == "mask" and shape.mask is not None:

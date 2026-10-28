@@ -6,11 +6,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 from PIL import Image
+from PySide6 import QtGui
 from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
 from labelme._app import MainWindow
 from labelme._shape import Shape
+from labelme._widgets._shape_render import render_shape
 
 from .conftest import MainWinFactory
 from .conftest import click_canvas_fraction
@@ -246,3 +248,57 @@ def test_tab_leaves_boxes_unchanged_and_does_not_add_undo_history(
     assert not win._is_changed
     assert len(canvas.shape_backups) == backups
     assert not Path(original_path).with_suffix(".json").exists()
+
+
+@pytest.mark.parametrize("scale", [1.0, 2.0])
+def test_active_box_is_thin_dashed_and_unfilled_until_skipped(
+    quick_edit_win: MainWindow,
+    qtbot: QtBot,
+    scale: float,
+) -> None:
+    win = quick_edit_win
+    canvas = win._canvas_widgets.canvas
+    canvas.scale = scale
+    first, _, second = canvas.shapes
+    background = QtGui.QColor(32, 48, 64)
+
+    def render(shape: Shape) -> QtGui.QImage:
+        image = QtGui.QImage(200, 200, QtGui.QImage.Format.Format_ARGB32)
+        image.fill(background)
+        painter = QtGui.QPainter(image)
+        try:
+            render_shape(
+                painter, shape, canvas._render_context(shape, highlighted=False)
+            )
+        finally:
+            painter.end()
+        return image
+
+    active = render(first)
+    # The middle of the animal remains unobscured even with Fill Editing enabled.
+    assert canvas._fill_editing
+    assert active.pixelColor(int(20 * scale), int(20 * scale)) == background
+    start, end = int(16 * scale), int(24 * scale)
+    edge_y = int(10 * scale)
+    edge = [active.pixelColor(x, edge_y) for x in range(start, end)]
+    assert background in edge  # Gaps between dashes.
+    assert any(color != background for color in edge)
+    # Only one screen-pixel row is occupied away from the corner handles.
+    assert all(
+        active.pixelColor(x, edge_y - 1) == background for x in range(start, end)
+    )
+    assert all(
+        active.pixelColor(x, edge_y + 1) == background for x in range(start, end)
+    )
+
+    qtbot.keyClick(canvas, Qt.Key.Key_Tab)
+    assert canvas.selected_shapes == [second]
+    skipped = render(first)
+    assert all(skipped.pixelColor(x, edge_y) != background for x in range(start, end))
+    second_image = render(second)
+    assert second_image.pixelColor(int(50 * scale), int(50 * scale)) == background
+    win._toggle_bounding_box_quick_edit(False)
+    canvas.select_shapes([first])
+    normal = render(first)
+    assert normal.pixelColor(int(20 * scale), int(20 * scale)) != background
+    win.mark_clean()
