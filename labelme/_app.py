@@ -1530,7 +1530,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if session.editing:
             text = self.tr(
                 "Quick Draw: edit a shape once to resume drawing | "
-                "Space: save and next · Esc: stop"
+                "E: resume drawing · Space: save and next · Esc: stop"
             )
         else:
             text = self.tr(
@@ -1565,7 +1565,12 @@ class MainWindow(QtWidgets.QMainWindow):
     def _edit_quick_draw_shape(self) -> None:
         session = self._quick_draw
         canvas = self._canvas_widgets.canvas
-        if session is None or len(canvas.shapes) <= session.existing_shape_count:
+        if session is None:
+            return
+        if session.editing:
+            self._finish_quick_draw_edit()
+            return
+        if not canvas.shapes:
             return
         canvas._cancel_current_shape()
         session.editing = True

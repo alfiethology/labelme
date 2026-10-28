@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Quick Draw's E shortcut now allows editing previously annotated shapes and toggles back to drawing when pressed again; a completed move or resize still resumes drawing automatically.
+
 - Quick Draw now adds shapes to already annotated images while preserving existing annotations, visits each image once per run, and starts from the selected image down the File List unless random selection is enabled. Clicking an image exits the run; restarting resumes from that image.
 
 - Bounding Box Shape Quick Edit now shows all boxes after editing or skipping the last box; Shift+Tab returns to a single dotted box with the others hidden, and advancing past the last box restores the overview.

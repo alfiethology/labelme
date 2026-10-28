@@ -558,9 +558,11 @@ directory configured with **File > Change Output Dir**.
   class keys are ignored while a new shape is unfinished.
 - **Space** saves completed shapes and advances. With no shapes, it skips the
   image without creating an empty JSON. An unfinished shape is discarded.
-- **E** selects the latest shape added during Quick Draw for editing. Move it
-  or drag a vertex/corner; drawing resumes as soon as that edit is finished.
-  Before adding a shape, E and the class number keys leave existing shapes alone.
+- **E** enters edit mode, initially selecting the latest shape. You can click
+  any existing shape, including one annotated before this run, to adjust it.
+  A completed move or vertex/corner adjustment resumes Quick Draw automatically.
+  Press **E** again to resume drawing without making an adjustment. The class
+  number keys still apply only to the latest shape added during Quick Draw.
 - **Escape**, or unchecking **Tools > Quick Draw…**, stops the run. Completed
   shapes on the current image remain available to save or undo normally.
 - Each image is visited at most once per run, including skipped images. To

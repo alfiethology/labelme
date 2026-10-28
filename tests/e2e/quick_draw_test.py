@@ -797,11 +797,14 @@ def test_quick_draw_adds_shapes_preserves_existing_metadata_and_resets_class_ord
     canvas = win._canvas_widgets.canvas
     assert _path(win).resolve() == (images / "b.png").resolve()
     assert "1 — cat" in win._quick_draw_progress.text()
-    # Before adding a shape, number keys and E must not alter an existing rat.
+    # Class keys leave existing rats alone; E can inspect them without changing them.
     qtbot.keyClick(canvas, Qt.Key.Key_2)
     qtbot.keyClick(canvas, Qt.Key.Key_E)
     assert canvas.shapes[0].label == "existing_rat"
+    assert canvas.mode == _CanvasMode.EDIT
+    qtbot.keyClick(canvas, Qt.Key.Key_E)
     assert canvas.mode == _CanvasMode.CREATE
+    assert not win._is_changed
 
     def draw() -> None:
         if shape_type == "rectangle":
@@ -991,3 +994,66 @@ def test_invalid_remembered_classes_fall_back_to_empty_setup(
 
     monkeypatch.setattr(QuickDrawDialog, "exec", inspect)
     win._toggle_quick_draw(True)
+
+
+@pytest.mark.parametrize("shape_type", ["rectangle", "polygon"])
+def test_e_can_edit_an_older_existing_shape_then_resume_quick_draw(
+    quick_draw_win: MainWindow,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    shape_type: str,
+) -> None:
+    win = quick_draw_win
+    image = _path(win).parent / "c.png"
+    original = _write_existing_annotation(image)
+    original["shapes"].append(
+        {
+            **original["shapes"][0],
+            "label": "another_rat",
+            "points": [[60, 60], [80, 80]],
+        }
+    )
+    image.with_suffix(".json").write_text(json.dumps(original))
+    _configure(monkeypatch, ("cat", "dog"), shape_type)
+    win._toggle_quick_draw(True)
+    canvas = win._canvas_widgets.canvas
+    first, second = canvas.shapes
+    qtbot.keyClick(canvas, Qt.Key.Key_E)
+    assert canvas.mode == _CanvasMode.EDIT
+    assert canvas.selected_shapes == [second]
+    # E again returns to drawing even if no geometry was changed.
+    qtbot.keyClick(canvas, Qt.Key.Key_E)
+    assert canvas.mode == _CanvasMode.CREATE
+    assert canvas.create_mode == shape_type
+    assert not win._is_changed
+    qtbot.keyClick(canvas, Qt.Key.Key_E)
+    start = image_to_widget_pos(canvas, QPointF(10, 10))
+    qtbot.mouseMove(canvas, start)
+    drag_canvas(
+        qtbot,
+        canvas,
+        Qt.MouseButton.LeftButton,
+        start,
+        image_to_widget_pos(canvas, QPointF(15, 15)),
+    )
+    assert canvas.mode == _CanvasMode.CREATE
+    assert win._quick_draw is not None and not win._quick_draw.editing
+    assert canvas.create_mode == shape_type
+    np_first = first.points.tolist()
+    assert np_first != original["shapes"][0]["points"]
+    assert second.points.tolist() == original["shapes"][1]["points"]
+    assert first.label == "existing_rat"
+    assert "1 — cat" in win._quick_draw_progress.text()
+    if shape_type == "rectangle":
+        _box(win, qtbot)
+    else:
+        for xy in ((0.4, 0.4), (0.8, 0.4), (0.8, 0.8)):
+            click_canvas_fraction(qtbot, canvas, xy)
+        qtbot.keyClick(canvas, Qt.Key.Key_Return)
+    assert canvas.shapes[-1].label == "cat"
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    saved = json.loads(image.with_suffix(".json").read_text())["shapes"]
+    assert len(saved) == 3
+    assert saved[0]["points"] == np_first
+    assert [shape["label"] for shape in saved] == ["existing_rat", "another_rat", "cat"]
+    assert saved[0]["flags"] == original["shapes"][0]["flags"]
