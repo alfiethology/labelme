@@ -41,6 +41,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Quick-Draw Skeleton now repeats the selected template immediately after each animal, supports E for a one-edit correction or return to drawing, and uses Space to save and advance with the same template.
+
 - Quick Draw's E shortcut now allows editing previously annotated shapes and toggles back to drawing when pressed again; a completed move or resize still resumes drawing automatically.
 
 - Quick Draw now adds shapes to already annotated images while preserving existing annotations, visits each image once per run, and starts from the selected image down the File List unless random selection is enabled. Clicking an image exits the run; restarting resumes from that image.

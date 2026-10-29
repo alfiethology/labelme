@@ -53,6 +53,20 @@ The template uses the suffix `.skeleton.json`. A placed Skeleton Shape embeds
 its keypoint definition in the Annotation File, so annotations remain loadable
 if the original template is renamed or removed.
 
+## Repeated Quick-Draw Skeleton annotation
+
+Choose **Pose > Quick-Draw Skeleton…** and select a remembered template or browse
+for its `.skeleton.json` file. Place its keypoints in order, then drag a bounding
+box containing them. Finishing one animal immediately prepares the first
+keypoint of the next animal using the same template.
+
+Press **E** to edit a completed shape; a completed move or resize returns to
+quick drawing, or press **E** again to return without editing. **Space** saves
+completed annotations and opens the next image with the same template, discarding
+any unfinished animal. Failed saves keep the current image and draft for retry.
+**Escape** exits the mode while keeping completed skeletons. Switching images
+manually or selecting another drawing tool also exits it.
+
 ## Skeleton Template format
 
 ```json

@@ -837,7 +837,21 @@ and connecting the same points for every animal:
    horizontal and vertical cursor guides work like rectangle drawing. The box
    must contain every placed keypoint.
 
-Use Ctrl+Z to undo the last point and Escape to cancel the draft. To make dense
+After finishing the box, the same template is immediately ready for the next
+animal on that image; click its first keypoint to begin another skeleton.
+
+- **E** enters edit mode for a completed shape. Move a box corner or keypoint;
+  drawing resumes automatically after that edit. Press **E** again to return
+  without changing anything. Entering edit mode discards any unfinished animal.
+- **Space** saves completed annotations and opens the next image, ready to draw
+  with the same template. Advancing discards any unfinished animal. A failed save
+  keeps the current image and draft so you can retry. At the final image,
+  Space saves and keeps that image open.
+- **Escape** ends Quick-Draw Skeleton and discards only the unfinished animal;
+  completed skeletons remain available to save or edit normally. Selecting a
+  different image or drawing tool also ends the mode.
+
+Use **Ctrl+Z** to undo the last point in a draft. To make dense
 skeletons easier to see, use **Pose > Set Node Marker Size…** and
 **Pose > Set Node Label Size…**. These display settings persist between Labelme
 sessions and do not change the saved coordinates or YOLO export.

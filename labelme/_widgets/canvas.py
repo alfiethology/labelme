@@ -1071,7 +1071,11 @@ class Canvas(QtWidgets.QWidget):
                 messages.append(self.tr("Click to place and name a node"))
             else:
                 messages.append(self.tr("Click to place: %s") % next_name)
-            messages.append(self.tr("Enter or Space to finish • Esc to cancel"))
+            messages.append(
+                self.tr("E to edit • Space to save and open next image • Esc to exit")
+                if self._skeleton_expected_node_names
+                else self.tr("Enter or Space to finish • Esc to cancel")
+            )
             self.status_updated.emit(" • ".join(messages))
             return
         if self._skeleton_drawing_mode == "edges":
@@ -1093,7 +1097,12 @@ class Canvas(QtWidgets.QWidget):
         if self._skeleton_drawing_mode == "bbox":
             messages.append(self.tr("Draw the skeleton bounding box"))
             messages.append(self.tr("Drag from one corner to the opposite corner"))
-            messages.append(self.tr("Ctrl+Z undoes the last node • Esc cancels"))
+            messages.append(
+                self.tr(
+                    "Ctrl+Z undoes the last node • E to edit • "
+                    "Space for next image • Esc cancels"
+                )
+            )
             self.status_updated.emit(" • ".join(messages))
             return
         if self.mode == _CanvasMode.CREATE:

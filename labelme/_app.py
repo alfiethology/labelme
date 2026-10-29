@@ -306,6 +306,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._editor_layout_state: QtCore.QByteArray | None = None
         self._editor_chrome: dict[QtWidgets.QWidget, bool] = {}
         self._quick_draw: _QuickDrawSession | None = None
+        self._quick_skeleton_template = None
         self._change_label_index = 0
         self._change_label_input = ""
         self._docks = self._setup_dock_widgets()
@@ -1960,6 +1961,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not accepted or not label:
             return
         self._stop_quick_draw()
+        self._stop_quick_skeleton_drawing()
         self._toggle_class_name_quick_edit(False)
         self._skeleton_drawing_label = label
         self._canvas_widgets.canvas.start_skeleton_drawing()
@@ -2113,7 +2115,15 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
         self._stop_quick_draw()
+        self._stop_quick_skeleton_drawing()
+        self._stop_change_labels()
         self._toggle_class_name_quick_edit(False)
+        self._toggle_bounding_box_quick_edit(False)
+        if self._canvas_widgets.canvas.is_drawing_skeleton:
+            self._canvas_widgets.canvas.cancel_skeleton_drawing()
+        if not self._canvas_widgets.canvas.shape_backups:
+            self._canvas_widgets.canvas.backup_shapes()
+        self.statusBar().clearMessage()
         self._quick_skeleton_template = skeleton
         self._skeleton_drawing_label = skeleton.label
         self._canvas_widgets.canvas.start_skeleton_drawing(
@@ -2126,6 +2136,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._skeleton_rename_action.setEnabled(False)
         self._skeleton_finish_action.setEnabled(False)
         self._skeleton_drawing_toolbar.show()
+        self._canvas_widgets.canvas.setFocus()
 
     def _finish_quick_skeleton_drawing(
         self, top_left: QtCore.QPointF, bottom_right: QtCore.QPointF
@@ -2157,8 +2168,71 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         canvas.take_skeleton_drawing()
         self._finish_skeleton_drawing_ui()
+        self._quick_skeleton_template = skeleton
         self._insert_shapes([shape])
+        self._start_quick_skeleton_drawing(skeleton)
+
+    def _stop_quick_skeleton_drawing(self) -> None:
+        if self._quick_skeleton_template is None:
+            return
+        canvas = self._canvas_widgets.canvas
+        if canvas.is_drawing_skeleton:
+            canvas.take_skeleton_drawing()
+        self._finish_skeleton_drawing_ui()
+        canvas.set_editing(True)
+        self.statusBar().clearMessage()
+        canvas._update_status()
+
+    def _toggle_quick_skeleton_edit(self) -> None:
+        skeleton = self._quick_skeleton_template
+        canvas = self._canvas_widgets.canvas
+        if skeleton is None:
+            return
+        if not canvas.is_drawing_skeleton:
+            self._start_quick_skeleton_drawing(skeleton)
+            return
+        if not canvas.shapes:
+            return
+        self._stop_quick_skeleton_drawing()
         self._switch_canvas_mode(edit=True)
+        self._quick_skeleton_template = skeleton
+        canvas.select_shapes([canvas.shapes[-1]])
+        canvas.setFocus()
+        self.show_status_message(
+            self.tr(
+                "Quick-Draw Skeleton: edit once or press E to resume; "
+                "Space saves and opens next image"
+            ),
+            0,
+        )
+
+    def _resume_quick_skeleton_after_edit(self) -> None:
+        skeleton = self._quick_skeleton_template
+        if skeleton is not None and not self._canvas_widgets.canvas.is_drawing_skeleton:
+            self._start_quick_skeleton_drawing(skeleton)
+
+    def _advance_quick_skeleton_image(self) -> None:
+        skeleton = self._quick_skeleton_template
+        if skeleton is None:
+            return
+        if self._is_changed:
+            if not self.save_labels(label_path=self.current_label_file_path()):
+                return
+            self.mark_clean()
+        next_row = self._docks.file_list.currentRow() + 1
+        if next_row >= self._docks.file_list.count():
+            self.show_status_message(
+                self.tr("Quick-Draw Skeleton: reached the final image."), 5000
+            )
+            return
+        expected_path = self._docks.file_list.item(next_row).text()
+        self._open_next_image()
+        if (
+            self._image_path is not None
+            and Path(self._image_path).resolve() == Path(expected_path).resolve()
+            and not self._canvas_widgets.canvas.pixmap.isNull()
+        ):
+            self._start_quick_skeleton_drawing(skeleton)
 
     def _place_skeleton_from_file(self) -> None:
         if self._image.isNull():
@@ -2214,6 +2288,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tr("<b>%s</b>") % error,
             )
             return
+        self._stop_quick_skeleton_drawing()
         self._remember_skeleton_template(filename)
         width = self._image.width()
         height = self._image.height()
@@ -3256,6 +3331,7 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         canvas.shape_moved.connect(self.mark_dirty)
         canvas.shape_moved.connect(self._finish_quick_draw_edit)
+        canvas.shape_moved.connect(self._resume_quick_skeleton_after_edit)
         canvas.selection_changed.connect(self._on_shape_selection_changed)
         canvas.class_name_requested.connect(self._quick_edit_class_name)
         canvas.drawing_polygon.connect(self._on_drawing_polygon_changed)
@@ -3458,6 +3534,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if saved or not (
                 self._bounding_box_quick_edit_active
                 or self._class_name_quick_edit_active
+                or self._quick_skeleton_template is not None
             ):
                 return
         self._is_changed = True
@@ -3605,6 +3682,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.mark_dirty()
 
     def reset_state(self) -> None:
+        self._stop_quick_skeleton_drawing()
         self._docks.label_list.clear()
         self._annotation = None
         self._image_path = None
@@ -3640,6 +3718,7 @@ class MainWindow(QtWidgets.QMainWindow):
     ) -> None:
         if not keep_quick_draw:
             self._stop_quick_draw()
+        self._stop_quick_skeleton_drawing()
         if self._class_name_quick_edit_active:
             self._toggle_class_name_quick_edit(False)
         if self._bounding_box_quick_edit_active:
@@ -4738,6 +4817,8 @@ class MainWindow(QtWidgets.QMainWindow):
         return True
 
     def _load_file(self, image_or_label_path: str) -> None:
+        was_quick_skeleton = self._quick_skeleton_template is not None
+        self._stop_quick_skeleton_drawing()
         if self._quick_draw is not None and not self._quick_draw.loading:
             self._stop_quick_draw()
         # changing fileListWidget loads file
@@ -4754,6 +4835,7 @@ class MainWindow(QtWidgets.QMainWindow):
         prev_shapes: list[Shape] = (
             self._canvas_widgets.canvas.shapes
             if self._quick_draw is None
+            and not was_quick_skeleton
             and (
                 self._config["keep_prev"]
                 or QtWidgets.QApplication.keyboardModifiers()
@@ -4988,6 +5070,7 @@ class MainWindow(QtWidgets.QMainWindow):
             a0.ignore()
         else:
             self._stop_quick_draw()
+            self._stop_quick_skeleton_drawing()
             self._toggle_class_name_quick_edit(False)
         self._window_state.setValue("window/size", self.size())
         self._window_state.setValue("window/position", self.pos())
@@ -5638,6 +5721,34 @@ class MainWindow(QtWidgets.QMainWindow):
             # Keep the canvas-only view until the user restores the layout.
             assert isinstance(watched, QtWidgets.QWidget)
             watched.hide()
+            return True
+        if (
+            self._quick_skeleton_template is not None
+            and watched is self._canvas_widgets.canvas
+            and isinstance(event, QtGui.QKeyEvent)
+            and event.type()
+            in (QtCore.QEvent.Type.ShortcutOverride, QtCore.QEvent.Type.KeyPress)
+            and (
+                (
+                    event.key() in (Qt.Key.Key_E, Qt.Key.Key_Space, Qt.Key.Key_Escape)
+                    and event.modifiers() == Qt.KeyboardModifier.NoModifier
+                )
+                or (
+                    self._canvas_widgets.canvas.is_drawing_skeleton
+                    and event.matches(QtGui.QKeySequence.StandardKey.Undo)
+                )
+            )
+        ):
+            event.accept()
+            if event.type() == QtCore.QEvent.Type.KeyPress and not event.isAutoRepeat():
+                if event.key() == Qt.Key.Key_E:
+                    self._toggle_quick_skeleton_edit()
+                elif event.key() == Qt.Key.Key_Space:
+                    self._advance_quick_skeleton_image()
+                elif event.matches(QtGui.QKeySequence.StandardKey.Undo):
+                    self._canvas_widgets.canvas.undo_skeleton_step()
+                else:
+                    self._stop_quick_skeleton_drawing()
             return True
         if (
             self._class_name_quick_edit_active
