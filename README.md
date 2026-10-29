@@ -763,6 +763,10 @@ images are removed from File List; this operation cannot be undone.
 
 1. In the **Custom YOLO Detector** toolbar panel, choose an Ultralytics `.pt`
    model and set the confidence threshold.
+1. For a pose model, choose **Pose template** in that panel and browse to the
+   `.skeleton.json` template used for its training annotations. This supplies the
+   keypoint names and bone connections. The choice is remembered separately for
+   each model; clear the field to use the model's own metadata.
 1. Open an image and select **Run** to add the model's predictions to the current
    annotation.
    Detection models create rectangles, instance- and semantic-segmentation models
@@ -775,6 +779,13 @@ images are removed from File List; this operation cannot be undone.
 1. For recorded footage, choose **Refine > From Video…**, select a video and
    choose the sampling interval. Refined frames and their JSON annotations are
    written to `<video-name>_refined_frames` beside the video.
+
+For pose models, the template's keypoint order must match the order used during
+training. A count mismatch is rejected, but matching counts alone cannot prove
+that names are in the right order. The template supplies names and bones without
+moving predicted points or changing the model file. It applies to **Run** and
+both refinement workflows. Select it before running inference; previously saved
+predictions retain their existing definitions.
 
 ### Draw and save a skeleton
 

@@ -2829,6 +2829,7 @@ class MainWindow(QtWidgets.QMainWindow):
             model_path=model_path,
             confidence=self._custom_yolo.confidence,
             polygon_point_spacing=self._custom_yolo.polygon_point_spacing,
+            pose_template_path=self._custom_yolo.pose_template_path,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -2936,6 +2937,7 @@ class MainWindow(QtWidgets.QMainWindow):
             model_path=model_path,
             confidence=self._custom_yolo.confidence,
             polygon_point_spacing=self._custom_yolo.polygon_point_spacing,
+            pose_template_path=self._custom_yolo.pose_template_path,
         )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
@@ -3136,6 +3138,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 model_path=model_path,
                 model_metadata=metadata,
                 polygon_point_spacing=self._custom_yolo.polygon_point_spacing,
+                pose_template=(
+                    read_skeleton_file(self._custom_yolo.pose_template_path)
+                    if self._custom_yolo.pose_template_path is not None
+                    else None
+                ),
             )
             logger.info(
                 "Custom YOLO returned {} shapes from {!r}",

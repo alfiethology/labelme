@@ -56,6 +56,23 @@ class CustomYoloWidget(QtWidgets.QWidget):
         self._update_active_model_label(stored_path)
         layout.addWidget(self._active_model_label)
 
+        pose_layout = QtWidgets.QHBoxLayout()
+        pose_layout.addWidget(QtWidgets.QLabel(self.tr("Pose template")))
+        self._pose_template_edit = QtWidgets.QLineEdit()
+        self._pose_template_edit.setPlaceholderText(self.tr("Optional .skeleton.json"))
+        self._pose_template_edit.setClearButtonEnabled(True)
+        self._pose_template_edit.textChanged.connect(self._on_pose_template_changed)
+        self._restore_pose_template(stored_path)
+        pose_layout.addWidget(self._pose_template_edit, stretch=1)
+        pose_browse = QtWidgets.QToolButton()
+        pose_browse.setText("…")
+        pose_browse.setToolTip(
+            self.tr("Choose keypoint names and bones for this pose model")
+        )
+        pose_browse.clicked.connect(self._browse_pose_template)
+        pose_layout.addWidget(pose_browse)
+        layout.addLayout(pose_layout)
+
         options = QtWidgets.QGridLayout()
         options.addWidget(QtWidgets.QLabel(self.tr("Confidence")), 0, 0)
         self._confidence = QtWidgets.QDoubleSpinBox()
@@ -104,6 +121,48 @@ class CustomYoloWidget(QtWidgets.QWidget):
         return Path(self._path_edit.text()).expanduser()
 
     @property
+    def pose_template_path(self) -> Path | None:
+        text = self._pose_template_edit.text().strip()
+        return Path(text).expanduser() if text else None
+
+    def _pose_templates(self) -> dict[str, str]:
+        stored = self._settings.value("customYolo/poseTemplates", {})
+        return dict(stored) if isinstance(stored, dict) else {}
+
+    def _restore_pose_template(self, model_path: str) -> None:
+        key = str(Path(model_path).expanduser().resolve())
+        path = self._pose_templates().get(key, "")
+        blocker = QtCore.QSignalBlocker(self._pose_template_edit)
+        self._pose_template_edit.setText(path if isinstance(path, str) else "")
+        self._pose_template_edit.setToolTip(
+            self.tr(
+                "Use the training keypoint order; "
+                "names and bones come from this template."
+            )
+        )
+        del blocker
+
+    def _on_pose_template_changed(self, path: str) -> None:
+        templates = self._pose_templates()
+        key = str(self.model_path.resolve())
+        if path.strip():
+            templates[key] = path.strip()
+        else:
+            templates.pop(key, None)
+        self._settings.setValue("customYolo/poseTemplates", templates)
+
+    def _browse_pose_template(self) -> None:
+        current = self.pose_template_path
+        filename, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            self.tr("Choose Pose Skeleton Template"),
+            str(current.parent if current is not None else self.model_path.parent),
+            self.tr("Skeleton templates (*.skeleton.json);;JSON files (*.json)"),
+        )
+        if filename:
+            self._pose_template_edit.setText(filename)
+
+    @property
     def confidence(self) -> float:
         return self._confidence.value()
 
@@ -116,6 +175,7 @@ class CustomYoloWidget(QtWidgets.QWidget):
         self._path_edit.setToolTip(path)
         self._active_model_label.setToolTip(path)
         self._update_active_model_label(path)
+        self._restore_pose_template(path)
 
     def _update_active_model_label(self, path: str) -> None:
         model_path = Path(path)

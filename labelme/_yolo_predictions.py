@@ -9,6 +9,7 @@ import numpy as np
 import numpy.typing as npt
 
 from ._pose import POSE_DATA_KEY
+from ._pose import SkeletonTemplate
 from ._shape import Shape
 
 
@@ -202,6 +203,7 @@ def shapes_from_yolo_result(
     model_path: Path,
     model_metadata: Mapping[str, Any] | None = None,
     polygon_point_spacing: float | None = None,
+    pose_template: SkeletonTemplate | None = None,
 ) -> list[Shape]:
     """Convert one Ultralytics result into editable Labelme shapes."""
 
@@ -241,6 +243,15 @@ def shapes_from_yolo_result(
     if result.keypoints is not None:
         boxes_xyxy = _to_numpy(boxes.xyxy).astype(np.float64)
         keypoints = _to_numpy(result.keypoints.xy).astype(np.float64)
+        if (
+            pose_template is not None
+            and len(pose_template.keypoints) != keypoints.shape[1]
+        ):
+            raise ValueError(
+                f"Pose template has {len(pose_template.keypoints)} keypoints, "
+                f"but the model predicts {keypoints.shape[1]}. "
+                "Choose the template used for training, with the same keypoint order."
+            )
         keypoint_confidence = getattr(result.keypoints, "conf", None)
         if keypoint_confidence is None:
             detected = np.any(keypoints != 0, axis=2)
@@ -262,9 +273,14 @@ def shapes_from_yolo_result(
             bbox = np.array(
                 [[left, top], [right, top], [right, bottom], [left, bottom]]
             )
-            keypoint_names, edges, flip_idx = _pose_metadata(
-                model_metadata=model_metadata, keypoint_count=len(nodes)
-            )
+            if pose_template is not None:
+                keypoint_names = list(pose_template.keypoints)
+                edges = [list(edge) for edge in pose_template.edges]
+                flip_idx = list(pose_template.flip_idx)
+            else:
+                keypoint_names, edges, flip_idx = _pose_metadata(
+                    model_metadata=model_metadata, keypoint_count=len(nodes)
+                )
             shapes.append(
                 Shape(
                     label=_class_name(names, int(class_id)),

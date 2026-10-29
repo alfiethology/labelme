@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added an optional Pose template selector to Custom YOLO Detector, remembered per model, to supply keypoint names and bones for pose predictions in single-image and frame/video refinement workflows; mismatched keypoint counts are rejected.
+
 - Quick Draw now remembers the last started session's shape type, ordered classes, and random-selection option between runs and application restarts.
 
 - Added Shift+Tab in Bounding Box Shape Quick Edit to select the previous box without undoing completed edits.

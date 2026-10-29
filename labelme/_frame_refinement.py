@@ -11,6 +11,7 @@ from ._label_file import Annotation
 from ._label_file import ShapeDict
 from ._label_file import read_image_file
 from ._label_file import write_label_file
+from ._pose import read_skeleton_file
 from ._shape import Shape
 from ._yolo_predictions import shapes_from_yolo_result
 
@@ -33,12 +34,14 @@ class FrameInferenceWorker(QtCore.QObject):
         model_path: Path,
         confidence: float,
         polygon_point_spacing: float = 10.0,
+        pose_template_path: Path | None = None,
     ) -> None:
         super().__init__()
         self._image_paths = image_paths
         self._model_path = model_path
         self._confidence = confidence
         self._polygon_point_spacing = polygon_point_spacing
+        self._pose_template_path = pose_template_path
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -52,6 +55,11 @@ class FrameInferenceWorker(QtCore.QObject):
             model = YOLO(str(self._model_path))
             model_yaml = getattr(getattr(model, "model", None), "yaml", None)
             metadata = model_yaml if isinstance(model_yaml, dict) else {}
+            pose_template = (
+                read_skeleton_file(self._pose_template_path)
+                if self._pose_template_path is not None
+                else None
+            )
             predictions: list[FramePrediction] = []
             for index, image_path in enumerate(self._image_paths, start=1):
                 if self._cancelled:
@@ -72,6 +80,7 @@ class FrameInferenceWorker(QtCore.QObject):
                             model_path=self._model_path,
                             model_metadata=metadata,
                             polygon_point_spacing=self._polygon_point_spacing,
+                            pose_template=pose_template,
                         ),
                     )
                 )
@@ -95,6 +104,7 @@ class VideoInferenceWorker(QtCore.QObject):
         model_path: Path,
         confidence: float,
         polygon_point_spacing: float = 10.0,
+        pose_template_path: Path | None = None,
     ) -> None:
         super().__init__()
         self._video_path = video_path
@@ -103,6 +113,7 @@ class VideoInferenceWorker(QtCore.QObject):
         self._model_path = model_path
         self._confidence = confidence
         self._polygon_point_spacing = polygon_point_spacing
+        self._pose_template_path = pose_template_path
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -118,6 +129,11 @@ class VideoInferenceWorker(QtCore.QObject):
             model = YOLO(str(self._model_path))
             model_yaml = getattr(getattr(model, "model", None), "yaml", None)
             metadata = model_yaml if isinstance(model_yaml, dict) else {}
+            pose_template = (
+                read_skeleton_file(self._pose_template_path)
+                if self._pose_template_path is not None
+                else None
+            )
             capture = cv2.VideoCapture(str(self._video_path))
             if not capture.isOpened():
                 raise RuntimeError(f"Could not open video: {self._video_path}")
@@ -153,6 +169,7 @@ class VideoInferenceWorker(QtCore.QObject):
                             model_path=self._model_path,
                             model_metadata=metadata,
                             polygon_point_spacing=self._polygon_point_spacing,
+                            pose_template=pose_template,
                         ),
                     )
                 )

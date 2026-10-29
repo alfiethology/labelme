@@ -84,6 +84,19 @@ manually or selecting another drawing tool also exits it.
 keypoint index to its horizontal mirror; self-mapping is valid for midline
 points and for skeletons where horizontal-flip augmentation is not used.
 
+## Name YOLO pose predictions and display bones
+
+If a custom pose model produces `keypoint_1`, `keypoint_2`, etc. without bones,
+choose the matching `.skeleton.json` file under **Pose template** in the
+**Custom YOLO Detector** panel. Use the template from the training annotations,
+with the same keypoint count and order, then run inference again.
+
+The template supplies names, connections, and mirror pairs while preserving the
+predicted coordinates and model class labels. It also applies when refining
+frames or video. The selection is remembered per model; clearing it restores
+embedded model metadata. It affects new predictions rather than rewriting
+existing annotations.
+
 ## YOLO pose compatibility
 
 Each Skeleton Shape contains the data needed for one YOLO pose row:
