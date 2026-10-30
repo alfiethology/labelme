@@ -8,6 +8,7 @@ import pytest
 from PySide6 import QtWidgets
 from pytestqt.qtbot import QtBot
 
+from labelme import _app
 from labelme._app import MainWindow
 
 from ..conftest import close_or_pause
@@ -114,7 +115,7 @@ def _verify_change_output_dir(win: MainWindow, paths: _Paths) -> bool:
             id="open_file",
         ),
         pytest.param(
-            "getExistingDirectory",
+            "get_existing_directory",
             _open_dir_dialog_return,
             _trigger_open_dir,
             _verify_open_dir,
@@ -148,7 +149,7 @@ def test_action_via_qfile_dialog(
     verify: Callable[[MainWindow, _Paths], bool],
 ) -> None:
     monkeypatch.setattr(
-        QtWidgets.QFileDialog,
+        _app if dialog_method == "get_existing_directory" else QtWidgets.QFileDialog,
         dialog_method,
         lambda *args, **kwargs: dialog_return(paths),
     )

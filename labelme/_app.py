@@ -98,6 +98,7 @@ from ._widgets.command_palette import Command
 from ._widgets.command_palette import CommandPalette
 from ._widgets.command_palette import collect_action_commands
 from ._widgets.crosshair_dialog import CrosshairDialog
+from ._widgets.directory_dialog import get_existing_directory
 from ._widgets.frame_extractor_dialog import FrameExtractorDialog
 from ._widgets.quick_draw_dialog import QuickDrawDialog
 from ._yolo_predictions import shapes_from_yolo_result
@@ -6018,14 +6019,10 @@ class MainWindow(QtWidgets.QMainWindow):
                 str(Path(self._image_path).parent) if self._image_path else "."
             )
 
-        dir_path = str(
-            QtWidgets.QFileDialog.getExistingDirectory(
-                self,
-                self.tr("%s - Open Directory") % __appname__,
-                default_open_dir_path,
-                QtWidgets.QFileDialog.Option.ShowDirsOnly
-                | QtWidgets.QFileDialog.Option.DontResolveSymlinks,
-            )
+        dir_path = get_existing_directory(
+            self,
+            self.tr("%s - Open Directory") % __appname__,
+            default_open_dir_path,
         )
         if dir_path:
             self._load_from_file_or_dir(file_or_dir=dir_path)
