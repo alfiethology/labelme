@@ -34,6 +34,8 @@ class ExtractionOptions:
     amount: float = 100
     percentage: bool = True
     random: bool = False
+    thermal_range: tuple[float, float] | None = None
+    thermal_analysis: dict | None = None
 
 
 def safe_name(value: str) -> str:
@@ -153,7 +155,10 @@ def extract_frames(
     """Keep completed videos on cancellation; discard the unfinished video's files."""
     result = ExtractionResult()
     ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
-    if not ffmpeg or not ffprobe:
+    if (
+        not options.videos
+        or any(video.path.suffix.lower() != ".csq" for video in options.videos)
+    ) and (not ffmpeg or not ffprobe):
         raise RuntimeError(
             "Frame extraction needs FFmpeg and ffprobe on PATH. "
             "Install FFmpeg, then restart Labelme. See https://ffmpeg.org/download.html"
@@ -170,6 +175,26 @@ def extract_frames(
     for position, video in enumerate(options.videos):
         base_progress = position * 100 // len(options.videos)
         try:
+            if video.path.suffix.lower() == ".csq":
+                saved, warnings = _extract_thermal_video(
+                    video,
+                    options,
+                    result.output,
+                    cancel,
+                    lambda value, message: progress(
+                        base_progress + value // len(options.videos), message
+                    ),
+                )
+                result.saved += saved
+                result.errors.extend(
+                    f"{video.path.name}: {warning}" for warning in warnings
+                )
+                result.completed += 1
+                progress(
+                    (position + 1) * 100 // len(options.videos),
+                    f"Saved {result.saved:,} frames",
+                )
+                continue
             indices: range | list[int] | None = None
             if options.percentage and options.amount == 100:
                 # All frames need only one decode pass, with no metadata scan.
@@ -251,7 +276,22 @@ def extract_frames(
                     "1",
                     str(stage_path).replace("%", "%%") + "/%09d.png",
                 ]
-                _run(command, cancel)
+                try:
+                    _run(command, cancel)
+                except RuntimeError as error:
+                    # FFmpeg 9 removed this option. Retain 5.1 compatibility
+                    # and retry its modern file-argument spelling only when
+                    # option parsing failed, before any frames were written.
+                    if (
+                        "-filter_complex_script" not in command
+                        or "Unrecognized option 'filter_complex_script'"
+                        not in str(error)
+                    ):
+                        raise
+                    command[command.index("-filter_complex_script")] = (
+                        "-/filter_complex"
+                    )
+                    _run(command, cancel)
                 images = sorted(stage_path.glob("*.png"))
                 if indices is None:
                     indices = range(len(images))
@@ -297,3 +337,76 @@ def extract_frames(
             f"Saved {result.saved:,} frames",
         )
     return result
+
+
+def _extract_thermal_video(
+    video: VideoSource,
+    options: ExtractionOptions,
+    output: Path,
+    cancel: threading.Event,
+    progress: Callable[[int, str], None],
+) -> tuple[int, list[str]]:
+    from ._thermal import ThermalSource
+    from ._thermal import save_frame
+
+    progress(0, f"Indexing thermal recording: {video.path.name}")
+    source = ThermalSource(video.path, cancel, progress)
+    indices = frame_indices(
+        len(source),
+        options.amount,
+        percentage=options.percentage,
+        random_selection=options.random,
+    )
+    with tempfile.TemporaryDirectory(prefix=".extract-", dir=output) as stage:
+        ready = Path(stage) / "ready"
+        ready.mkdir()
+        limits = options.thermal_range
+        for number, index in enumerate(indices):
+            if cancel.is_set():
+                raise ExtractionCancelled
+            frame = source.read(index, cancel)
+            if options.thermal_analysis:
+                from ._thermal import ThermalFrame
+                from ._thermal_analysis import recalculate
+
+                frame = recalculate(
+                    frame, options.thermal_analysis.get("parameters", {})
+                )
+                frame = ThermalFrame(
+                    frame.celsius,
+                    frame.raw,
+                    dict(frame.metadata, analysis=options.thermal_analysis),
+                )
+            if limits is None:
+                low, high = frame.limits
+                limits = (low, max(high, low + 0.1))
+            save_frame(
+                frame,
+                ready / f"{video.name}_frame_{index:09d}.png",
+                *limits,
+                source=str(video.path),
+                index=index,
+                display=(options.thermal_analysis or {}).get("display"),
+            )
+            progress(
+                (number + 1) * 100 // len(indices),
+                f"Decoded {number + 1:,} / {len(indices):,} thermal frames",
+            )
+        if cancel.is_set():
+            raise ExtractionCancelled
+        if options.separate_folders:
+            ready.rename(output / video.name)
+        else:
+            published = []
+            try:
+                for file in ready.iterdir():
+                    if cancel.is_set():
+                        raise ExtractionCancelled
+                    target = output / file.name
+                    file.rename(target)
+                    published.append(target)
+            except (OSError, ExtractionCancelled):
+                for target in published:
+                    target.unlink(missing_ok=True)
+                raise
+    return len(indices), source.warnings

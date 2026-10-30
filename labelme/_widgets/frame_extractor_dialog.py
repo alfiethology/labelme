@@ -71,6 +71,8 @@ class FrameExtractorDialog(QtWidgets.QDialog):
         self.resize(760, 760)
         self._thread: ExtractionThread | None = None
         self._videos: list[Path] = []
+        self.thermal_range: tuple[float, float] | None = None
+        self.thermal_analysis: dict | None = None
         layout = QtWidgets.QVBoxLayout(self)
         scroll = QtWidgets.QScrollArea()
         scroll.setWidgetResizable(True)
@@ -82,8 +84,10 @@ class FrameExtractorDialog(QtWidgets.QDialog):
 
         intro = QtWidgets.QLabel(
             self.tr(
-                "Extract PNG images from MP4 (.mp4) and AVI (.avi) videos. "
-                "Requires FFmpeg 5.1+ and ffprobe on PATH. Your current image, unsaved "
+                "Extract PNG images from MP4, AVI and FLIR CSQ videos. "
+                "CSQ frames include temperature data; keep each PNG and "
+                ".thermal.npz file together. MP4/AVI require FFmpeg 5.1+ and ffprobe; "
+                "compressed CSQ requires FFmpeg. Your current image, unsaved "
                 "annotations and File List stay unchanged."
             )
         )
@@ -225,16 +229,20 @@ class FrameExtractorDialog(QtWidgets.QDialog):
     def _choose_videos(self) -> None:
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
-            self.tr("Select MP4 or AVI videos"),
+            self.tr("Select MP4, AVI or FLIR CSQ videos"),
             "",
-            self.tr("Videos (*.mp4 *.avi *.MP4 *.AVI)"),
+            self.tr("Videos (*.mp4 *.avi *.csq *.MP4 *.AVI *.CSQ)"),
         )
         self.add_videos([Path(path) for path in paths])
 
     def add_videos(self, paths: list[Path]) -> None:
         for path in paths:
             path = path.resolve()
-            if path in self._videos or path.suffix.lower() not in {".mp4", ".avi"}:
+            if path in self._videos or path.suffix.lower() not in {
+                ".mp4",
+                ".avi",
+                ".csq",
+            }:
                 continue
             used = {
                 item.text().casefold()
@@ -290,7 +298,7 @@ class FrameExtractorDialog(QtWidgets.QDialog):
 
     def _options(self) -> ExtractionOptions:
         if not self._videos:
-            raise ValueError(self.tr("Add at least one MP4 or AVI video."))
+            raise ValueError(self.tr("Add at least one MP4, AVI or CSQ video."))
         if not self.output.text().strip():
             raise ValueError(self.tr("Choose an existing output folder."))
         output = Path(self.output.text().strip()).expanduser().resolve()
@@ -328,6 +336,8 @@ class FrameExtractorDialog(QtWidgets.QDialog):
             percentage=percentage,
             amount=self.percentage.value() if percentage else self.count.value(),
             random=self.random.isChecked(),
+            thermal_range=self.thermal_range,
+            thermal_analysis=self.thermal_analysis,
         )
 
     def _start(self) -> None:

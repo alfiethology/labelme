@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Expanded thermal analysis with spot/box/circle/line measurements, selected annotation Shape statistics, mean-temperature differences, line profiles, palette and unit selectors, histogram contrast, hot/cold markers, isotherm coverage, editable measurement parameters, and temperature CSV / HTML report exports. Thermal analysis settings round-trip with exported frames and annotations.
+
+- Added Tools > FLIR Thermal Images and Video… for radiometric JPEG and CSQ viewing, frame minimum/maximum/mean and pointer temperatures, an iron-style palette (dark blue/purple → red → orange → yellow → white) with adjustable temperature limits, and extraction with preserved temperature data. Exported thermal frames retain adjustable temperature controls while annotating.
+
 - Added an optional Pose template selector to Custom YOLO Detector, remembered per model, to supply keypoint names and bones for pose predictions in single-image and frame/video refinement workflows; mismatched keypoint counts are rejected.
 
 - Quick Draw now remembers the last started session's shape type, ordered classes, and random-selection option between runs and application restarts.
@@ -81,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the `logger_level` config key, which had no effect: log verbosity has always been controlled solely by the `--logger-level` CLI flag. A `logger_level` entry remaining in an existing `~/.labelmerc` is dropped on load, so old config files keep working unchanged ([#2402](https://github.com/wkentaro/labelme/pull/2402))
 
 ### Fixed
+
+- Fixed sampled MP4/AVI frame extraction with FFmpeg 9 while retaining support for older FFmpeg versions.
 
 - Fixed polygon vertices, skeleton nodes, and standalone points using the global drawing colour instead of their label colour, and Change Class Color opening with that global colour. Saved per-label colours and outer ring colours are preserved.
 - Fixed the Label List sidebar showing only classes from visited images: it now discovers every class in the current File List's JSON annotations when a directory opens, while preserving existing class colours and visibility choices.

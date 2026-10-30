@@ -100,6 +100,8 @@ from ._widgets.command_palette import collect_action_commands
 from ._widgets.crosshair_dialog import CrosshairDialog
 from ._widgets.frame_extractor_dialog import FrameExtractorDialog
 from ._widgets.quick_draw_dialog import QuickDrawDialog
+from ._widgets.thermal import ThermalControls
+from ._widgets.thermal import ThermalDialog
 from ._yolo_predictions import shapes_from_yolo_result
 
 
@@ -314,6 +316,20 @@ class MainWindow(QtWidgets.QMainWindow):
         self.setAcceptDrops(True)
         self._canvas_widgets = self._setup_canvas()
         self._canvas_widgets.canvas.installEventFilter(self)
+        self._thermal_controls = ThermalControls(self)
+        self._thermal_dock = QtWidgets.QDockWidget(
+            self.tr("Thermal Temperatures"), self
+        )
+        self._thermal_dock.setObjectName("ThermalTemperatures")
+        self._thermal_dock.setWidget(self._thermal_controls)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._thermal_dock)
+        self._thermal_dock.hide()
+        self._thermal_controls.range_changed.connect(self._apply_thermal_range)
+        self._canvas_widgets.canvas.mouse_moved.connect(
+            lambda pos: self._thermal_controls.show_temperature(pos.x(), pos.y())
+        )
+        self._canvas_widgets.canvas.selection_changed.connect(self._refresh_thermal_measurements)
+        self._canvas_widgets.canvas.shape_moved.connect(self._refresh_thermal_measurements)
 
         self._actions = self._setup_actions()
         self._persistent_actions = {
@@ -1022,6 +1038,93 @@ class MainWindow(QtWidgets.QMainWindow):
         dialog.exec()
         dialog.deleteLater()
 
+    def _open_thermal_tool(self) -> None:
+        dialog = ThermalDialog(self)
+        dialog.exec()
+        exported = dialog.exported_image
+        dialog.deleteLater()
+        if exported is not None and self._can_continue():
+            self._load_from_file_or_dir(file_or_dir=str(exported.parent))
+
+    def _load_thermal_data(self) -> None:
+        from ._thermal import load_frame
+        from ._thermal import sidecar_path
+
+        if (
+            self._image_path is None
+            or not sidecar_path(Path(self._image_path)).exists()
+        ):
+            return
+        self._thermal_dock.show()
+        try:
+            frame, limits = load_frame(Path(self._image_path))
+            if self._image.size() != QtCore.QSize(
+                frame.celsius.shape[1], frame.celsius.shape[0]
+            ):
+                raise ValueError(
+                    "Annotation image and thermal data dimensions disagree."
+                )
+            saved = self._annotation.other_data.get("thermal_display_celsius")
+            if saved is not None:
+                if (
+                    not isinstance(saved, list)
+                    or len(saved) != 2
+                    or not all(
+                        isinstance(v, int | float) and math.isfinite(v) for v in saved
+                    )
+                    or saved[0] >= saved[1]
+                ):
+                    raise ValueError("Invalid saved thermal display range.")
+                limits = tuple(saved)
+            elif (
+                self._thermal_controls.keep_scale.isChecked()
+                and self._thermal_controls._limits
+            ):
+                limits = self._thermal_controls._limits
+            self._thermal_controls.options.restore(
+                self._annotation.other_data.get(
+                    "thermal_analysis", frame.metadata.get("analysis", {})
+                )
+            )
+            self._thermal_controls.set_frame(frame, limits)
+            self._image = self._thermal_controls.options.image()
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            self._thermal_controls.clear()
+            self._thermal_controls.statistics.setText(
+                self.tr("Cannot load temperatures: ") + str(error)
+            )
+
+    def _apply_thermal_range(self, low: float, high: float) -> None:
+        frame = self._thermal_controls.frame
+        if frame is None or self._annotation is None:
+            return
+        self._image = self._thermal_controls.options.image()
+        self._canvas_widgets.canvas.load_pixmap(
+            QtGui.QPixmap.fromImage(self._image), clear_shapes=False
+        )
+        self._annotation.other_data["thermal_display_celsius"] = [low, high]
+        self._annotation.other_data["thermal_analysis"] = (
+            self._thermal_controls.options.state()
+        )
+        self._refresh_thermal_measurements()
+        self.mark_dirty()
+
+    def _refresh_thermal_measurements(self, *_: object) -> None:
+        if self._thermal_controls.frame is None:
+            return
+        from ._thermal_analysis import Measurement
+
+        supported = {
+            "point", "rectangle", "circle", "line", "polygon", "oriented_rectangle"
+        }
+        self._thermal_controls.options.annotation_measurements = [
+            Measurement(shape.label or self.tr("Shape"), shape.shape_type,
+                        tuple(map(tuple, shape.points.tolist())))
+            for shape in self._canvas_widgets.canvas.selected_shapes
+            if shape.shape_type in supported
+        ]
+        self._thermal_controls.options.refresh_measurements()
+
     def _setup_menus(self) -> _Menus:
         action = functools.partial(_utils.new_action, self)
         shortcuts = self._config["shortcuts"]
@@ -1140,10 +1243,19 @@ class MainWindow(QtWidgets.QMainWindow):
             tools_menu,
             (
                 action(
+                    self.tr("FLIR Thermal Images and Video…"),
+                    self._open_thermal_tool,
+                    tip=self.tr(
+                        "View radiometric JPEGs and CSQ frames "
+                        "with temperature controls"
+                    ),
+                ),
+                action(
                     self.tr("Extract Video Frames…"),
                     self._extract_video_frames,
                     tip=self.tr(
-                        "Extract all or sampled frames from MP4 and AVI videos"
+                        "Extract all or sampled frames from MP4, AVI "
+                        "and FLIR CSQ videos"
                     ),
                 ),
                 None,
@@ -1257,6 +1369,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self._docks.label_dock.toggleViewAction(),
                 self._docks.shape_dock.toggleViewAction(),
                 self._docks.file_dock.toggleViewAction(),
+                self._thermal_dock.toggleViewAction(),
                 None,
                 self._actions.reset_layout,
                 self._actions.black_background,
@@ -3696,6 +3809,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._label_file_path = None
         self._point_mode_label_state = None
         self._canvas_widgets.canvas.reset_state()
+        self._thermal_controls.clear()
+        self._thermal_dock.hide()
 
     # Callbacks
 
@@ -4739,6 +4854,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def open_brightness_contrast_dialog(
         self, value: bool, is_initial_load: bool = False
     ) -> None:
+        if self._thermal_controls.frame is not None:
+            return
         if self._image_path is None:
             logger.warning("image_path is None, cannot set brightness/contrast")
             return
@@ -4902,6 +5019,8 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return
         self._image = image
+        self._load_thermal_data()
+        image = self._image
         t0 = time.time()
         self._canvas_widgets.canvas.load_pixmap(QtGui.QPixmap.fromImage(image))
         logger.debug("Loaded pixmap in {:.0f}ms", (time.time() - t0) * 1000)
@@ -4939,6 +5058,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_brightness_contrast_dialog(value=False, is_initial_load=True)
         self._paint_canvas()
         self.update_action_states(True)
+        if self._thermal_controls.frame is not None:
+            self._actions.brightness_contrast.setEnabled(False)
         # A load never pulls the keyboard out of the File List, whatever drove
         # it; otherwise an arrow-key walk of the list ends after one keypress.
         if not self._docks.file_list.hasFocus():
