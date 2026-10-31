@@ -60,6 +60,12 @@ _SkeletonDrawingMode = Literal["nodes", "edges", "rename", "bbox"]
 
 
 @dataclasses.dataclass(frozen=True)
+class _PanPress:
+    event: QtGui.QMouseEvent
+    screen_position: QPoint
+
+
+@dataclasses.dataclass(frozen=True)
 class _DraftShape:
     """In-progress shape held in QPointF while drawing, before it is committed
     to a Qt-free numpy `Shape` at finalize time. Immutable so each edit returns a
@@ -277,6 +283,7 @@ class Canvas(QtWidgets.QWidget):
         self._polygon_hold_timer.timeout.connect(self._append_held_polygon_point)
 
         self._cursor = CursorRole.DEFAULT
+        self._edit_cursor = _canvas_interaction.make_edit_cursor()
         self.reset_state()
 
         # self._line represents:
@@ -300,6 +307,9 @@ class Canvas(QtWidgets.QWidget):
         self._hovered_shape_is_selected: bool = False
         self._painter = QtGui.QPainter()
         self._pan_anchor = None
+        self._pan_button = Qt.MouseButton.NoButton
+        self._pending_left_pan: _PanPress | None = None
+        self._cancelled_left_pan = False
         self._zoom_rect_enabled = False
         self._zoom_rect_start: QPointF | None = None
         self._zoom_rect_end: QPointF | None = None
@@ -700,6 +710,7 @@ class Canvas(QtWidgets.QWidget):
         if new_mode == self._create_mode:
             return
         old_mode = self._create_mode
+        self._finish_pan()
         # Update the mode before reconciling so any signals fired from a cancel
         # observe the new mode rather than the one being left behind.
         self._create_mode = new_mode
@@ -791,6 +802,7 @@ class Canvas(QtWidgets.QWidget):
     def leaveEvent(self, a0: QtCore.QEvent) -> None:
         self._left_button_held = False
         self._polygon_hold_timer.stop()
+        self._finish_pan()
         if self._set_highlight(
             hovered_shape=None,
             hovered_edge=None,
@@ -804,7 +816,7 @@ class Canvas(QtWidgets.QWidget):
     def focusOutEvent(self, a0: QtGui.QFocusEvent) -> None:
         self._left_button_held = False
         self._polygon_hold_timer.stop()
-        self._release_cursor()
+        self._finish_pan()
         self._update_status()
 
     @property
@@ -969,11 +981,14 @@ class Canvas(QtWidgets.QWidget):
         self.update()
 
     def set_editing(self, value: bool = True) -> None:
+        self._finish_pan()
         if self._class_name_quick_edit:
             self.set_class_name_quick_edit(False)
         if self._bounding_box_quick_edit:
             self.set_bounding_box_quick_edit(False)
         self.mode = _CanvasMode.EDIT if value else _CanvasMode.CREATE
+        if self.underMouse():
+            self._apply_cursor(CursorRole.EDIT if value else CursorRole.DRAW)
         if self.mode == _CanvasMode.EDIT:
             # CREATE -> EDIT
             self.update()  # clear crosshair
@@ -1173,6 +1188,8 @@ class Canvas(QtWidgets.QWidget):
         self._dispatch_pointer_move(pos=pos, event=a0)
 
     def _dispatch_pointer_move(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
+        if self._cancelled_left_pan and event.buttons() & Qt.MouseButton.LeftButton:
+            return
         if self._class_name_quick_edit and self._pan_anchor is None:
             self._apply_cursor(
                 CursorRole.HANDLE
@@ -1188,6 +1205,9 @@ class Canvas(QtWidgets.QWidget):
         if self._zoom_rect_start is not None:
             self._zoom_rect_end = event.position()
             self.update()
+            return
+        if self._pending_left_pan is not None:
+            self._maybe_start_left_pan(event=event)
             return
         if self._pan_anchor is not None:
             self._advance_pan(event=event)
@@ -1502,7 +1522,7 @@ class Canvas(QtWidgets.QWidget):
         )
 
         if target is None:
-            self._release_cursor()
+            self._apply_cursor(CursorRole.EDIT)
             if self._set_highlight(
                 hovered_shape=None,
                 hovered_edge=None,
@@ -1624,6 +1644,8 @@ class Canvas(QtWidgets.QWidget):
 
     def _dispatch_pointer_press(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
         button = event.button()
+        if button == Qt.MouseButton.LeftButton:
+            self._cancelled_left_pan = False
         if self._class_name_quick_edit and button != Qt.MouseButton.MiddleButton:
             self._quick_class_pressed_shape = None
             if button == Qt.MouseButton.LeftButton:
@@ -1646,6 +1668,12 @@ class Canvas(QtWidgets.QWidget):
                 self._apply_cursor(CursorRole.DRAW)
                 self.update()
                 return
+            if self._can_start_left_pan(pos=pos, event=event):
+                self._pending_left_pan = _PanPress(
+                    event=QtGui.QMouseEvent(event),
+                    screen_position=self.mapToGlobal(event.position().toPoint()),
+                )
+                return
             self._press_left(pos=pos, event=event)
             if (
                 self.mode == _CanvasMode.CREATE
@@ -1662,6 +1690,46 @@ class Canvas(QtWidgets.QWidget):
             and self._is_image_overflowing_viewport()
         ):
             self._begin_pan(event=event)
+
+    def _maybe_start_left_pan(self, event: QtGui.QMouseEvent) -> bool:
+        pending = self._pending_left_pan
+        if pending is None:
+            return False
+        current = self.mapToGlobal(event.position().toPoint())
+        distance = (current - pending.screen_position).manhattanLength()
+        if distance < QtWidgets.QApplication.startDragDistance():
+            return False
+        self._pending_left_pan = None
+        self._begin_pan(event=pending.event)
+        self._pan_anchor = QPointF(pending.screen_position)
+        self._advance_pan(event=event)
+        return True
+
+    def _can_start_left_pan(self, pos: QPointF, event: QtGui.QMouseEvent) -> bool:
+        if (
+            event.modifiers() != Qt.KeyboardModifier.NoModifier
+            or not self._is_image_overflowing_viewport()
+        ):
+            return False
+        if self.is_drawing_skeleton:
+            if self._skeleton_drawing_mode != "nodes":
+                return False
+            if self._nearest_skeleton_node_index(pos=pos) is not None:
+                return False
+        elif self.mode == _CanvasMode.CREATE and self.create_mode not in (
+            "point",
+            "ai_points_to_shape",
+        ):
+            return False
+        target = _canvas_interaction.find_hover_target(
+            shapes=self.shapes,
+            point=np.array([pos.x(), pos.y()]),
+            scale=self.scale,
+            epsilon=self._epsilon,
+            point_size=self._point_size,
+            priority_shape=self.hovered_shape,
+        )
+        return target is None
 
     def _press_left(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
         if self.is_drawing_skeleton:
@@ -1819,6 +1887,8 @@ class Canvas(QtWidgets.QWidget):
         self.update()
 
     def _press_left_while_editing(self, pos: QPointF, event: QtGui.QMouseEvent) -> None:
+        # A click can arrive at a newer position than the last hover event.
+        self._highlight_hover_shape(pos=pos, status_messages=[])
         self._vertex_drag_targets = []
         modifiers = event.modifiers()
         if self._maybe_modify_polygon_topology(pos=pos, modifiers=modifiers):
@@ -1887,8 +1957,9 @@ class Canvas(QtWidgets.QWidget):
         self._prev_point = pos
 
     def _begin_pan(self, event: QtGui.QMouseEvent) -> None:
-        self._apply_cursor(CursorRole.GRAB)
         self._pan_anchor = QPointF(self.mapToGlobal(event.position().toPoint()))
+        self._pan_button = event.button()
+        self._apply_cursor(CursorRole.GRAB)
 
     def mouseReleaseEvent(self, a0: QtGui.QMouseEvent) -> None:
         self._dispatch_pointer_release(event=a0)
@@ -1897,6 +1968,16 @@ class Canvas(QtWidgets.QWidget):
         self._update_status()
 
     def _dispatch_pointer_release(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._cancelled_left_pan:
+            self._cancelled_left_pan = False
+            self._left_button_held = False
+            return
+        if event.button() == self._pan_button:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._left_button_held = False
+            self._finish_pan()
+            self._cancelled_left_pan = False
+            return
         if (
             self._class_name_quick_edit
             and event.button() != Qt.MouseButton.MiddleButton
@@ -1923,6 +2004,17 @@ class Canvas(QtWidgets.QWidget):
         if button == Qt.MouseButton.LeftButton:
             self._left_button_held = False
             self._polygon_hold_timer.stop()
+            if self._maybe_start_left_pan(event=event):
+                self._finish_pan()
+                self._cancelled_left_pan = False
+                return
+            if self._pending_left_pan is not None:
+                # A release before the drag threshold is a normal click at
+                # the original press position, including point placement.
+                press = self._pending_left_pan.event
+                self._pending_left_pan = None
+                pos = self._transform_point_widget_to_image(press.position())
+                self._press_left(pos=pos, event=press)
             if self._zoom_rect_start is not None:
                 self._finish_zoom_rect()
                 return
@@ -2083,9 +2175,16 @@ class Canvas(QtWidgets.QWidget):
         )
 
     def _finish_pan(self) -> None:
-        # Reset state and cursor unconditionally so a stray middle-button
-        # release can never leave a grab cursor stuck on screen.
+        # A cancelled left drag must stay consumed until release, so later
+        # movement cannot accidentally start dragging a selected annotation.
+        if (
+            self._pending_left_pan is not None
+            or self._pan_button == Qt.MouseButton.LeftButton
+        ):
+            self._cancelled_left_pan = True
         self._pan_anchor = None
+        self._pan_button = Qt.MouseButton.NoButton
+        self._pending_left_pan = None
         self._release_cursor()
 
     def _finish_zoom_rect(self) -> None:
@@ -2231,7 +2330,14 @@ class Canvas(QtWidgets.QWidget):
                 self.update()
             return
 
-        clicked_shape = self._find_shape_at_point(point)
+        # Standalone points compete with vertices by distance during hover.
+        # Preserve that winner instead of re-picking an overlapping polygon body.
+        clicked_shape = (
+            self.hovered_shape
+            if self.hovered_shape is not None
+            and self.hovered_shape.shape_type == "point"
+            else self._find_shape_at_point(point)
+        )
         if clicked_shape is None:
             if self.deselect_shape():
                 self.update()
@@ -2930,6 +3036,8 @@ class Canvas(QtWidgets.QWidget):
         self._is_moving_shape = True
 
     def keyPressEvent(self, a0: QtGui.QKeyEvent) -> None:
+        if a0.key() == Qt.Key.Key_Escape:
+            self._finish_pan()
         if self._bounding_box_quick_edit:
             return
         modifiers = a0.modifiers()
@@ -3060,6 +3168,7 @@ class Canvas(QtWidgets.QWidget):
             self._cancel_current_shape()
 
     def _reset_interaction_state(self) -> None:
+        self._finish_pan()
         was_drawing_skeleton = self.is_drawing_skeleton
         self._skeleton_drawing_mode = None
         self._skeleton_node_names = []
@@ -3112,13 +3221,20 @@ class Canvas(QtWidgets.QWidget):
         self.update()
 
     def _apply_cursor(self, role: CursorRole) -> None:
+        if (
+            self.mode == _CanvasMode.EDIT
+            and self._pan_anchor is None
+            and role != CursorRole.DRAW
+        ):
+            role = CursorRole.EDIT
         if role == self._cursor:
             return
-        cursor = (
-            _canvas_interaction.make_drawing_cursor()
-            if role == CursorRole.DRAW
-            else QtGui.QCursor(_canvas_interaction.cursor_shape_for(role=role))
-        )
+        if role == CursorRole.EDIT:
+            cursor = self._edit_cursor
+        elif role == CursorRole.DRAW:
+            cursor = _canvas_interaction.make_drawing_cursor()
+        else:
+            cursor = QtGui.QCursor(_canvas_interaction.cursor_shape_for(role=role))
         # Push on first apply; swap the top of the stack we already own afterwards.
         if self._cursor == CursorRole.DEFAULT:
             QtWidgets.QApplication.setOverrideCursor(cursor)
@@ -3133,6 +3249,10 @@ class Canvas(QtWidgets.QWidget):
         QtWidgets.QApplication.restoreOverrideCursor()
 
     def reset_state(self) -> None:
+        self._pan_anchor = None
+        self._pan_button = Qt.MouseButton.NoButton
+        self._pending_left_pan = None
+        self._cancelled_left_pan = False
         self._class_name_quick_edit = False
         self._quick_class_pressed_shape: Shape | None = None
         self._bounding_box_quick_edit = False

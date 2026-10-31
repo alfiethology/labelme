@@ -98,3 +98,45 @@ def test_middle_drag_no_pan_when_image_fits_viewport(
         )
 
     close_or_pause(qtbot=qtbot, widget=annotated_win, pause=pause)
+
+
+@pytest.mark.gui
+@pytest.mark.parametrize("placing_points", [False, True])
+def test_left_drag_empty_canvas_moves_scrollbars_without_annotations(
+    qtbot: QtBot, annotated_win: MainWindow, placing_points: bool
+) -> None:
+    canvas = annotated_win._canvas_widgets.canvas
+    canvas.load_shapes([])
+    canvas.set_editing(not placing_points)
+    if placing_points:
+        canvas.create_mode = "point"
+    viewport = canvas._scroll_viewport()
+    assert viewport is not None
+    canvas.scale = 2 * max(
+        viewport.width() / canvas.pixmap.width(),
+        viewport.height() / canvas.pixmap.height(),
+    )
+    canvas.adjustSize()
+    qtbot.wait(10)
+    bars = list(annotated_win._canvas_widgets.scroll_bars.values())
+    for bar in bars:
+        bar.setValue(bar.maximum() // 2)
+    before = [bar.value() for bar in bars]
+    start = canvas.visibleRegion().boundingRect().center()
+    end = start + QPoint(_DRAG_OFFSET_PX, _DRAG_OFFSET_PX)
+    with (
+        qtbot.assertNotEmitted(canvas.new_shape),
+        qtbot.assertNotEmitted(canvas.shape_moved),
+    ):
+        drag_canvas(
+            qtbot=qtbot,
+            canvas=canvas,
+            button=Qt.MouseButton.LeftButton,
+            start=start,
+            end=end,
+        )
+    assert [bar.value() for bar in bars] == [
+        value - _DRAG_OFFSET_PX for value in before
+    ]
+    assert not canvas.shapes
+    assert canvas._pan_anchor is None

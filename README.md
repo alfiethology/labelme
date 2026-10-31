@@ -311,7 +311,7 @@ Labels reserve some keys while active. Keep focus on the canvas when using them.
 | Fit the image width | **Ctrl+Shift+F** |
 | Return to original image scale | **Ctrl+0** |
 | Zoom to a region | Press **Z**, then drag around the region |
-| Pan a zoomed image | Hold the middle mouse button and drag |
+| Pan a zoomed image | Left-drag empty space while editing shapes or placing points; middle-drag works in any mode |
 | Scroll horizontally | **Shift+mouse wheel** |
 | Hide or restore menus, panels, and bars | **F11** |
 

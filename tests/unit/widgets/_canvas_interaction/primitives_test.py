@@ -264,6 +264,80 @@ def test_priority_shape_not_duplicated_in_candidates() -> None:
     assert result.index == 0
 
 
+@pytest.mark.parametrize("scale", [0.5, 1.0, 2.5])
+@pytest.mark.parametrize("reverse_order", [False, True])
+@pytest.mark.parametrize("priority", ["polygon", "point", None])
+def test_closest_point_wins_over_polygon_vertex(
+    scale: float, reverse_order: bool, priority: str | None
+) -> None:
+    polygon = _polygon([(20, 20), (80, 20), (50, 80)])
+    point = Shape(shape_type="point", points=[[20 + 6 / scale, 20]])
+    shapes = [point, polygon] if reverse_order else [polygon, point]
+    priority_shape = {"polygon": polygon, "point": point, None: None}[priority]
+
+    # Both targets are within their existing pick radii. Distance wins over
+    # paint order, shape category, and the previously hovered shape.
+    for offset, expected_shape, expected_kind in (
+        (5, point, HitKind.BODY),
+        (2.5, polygon, HitKind.VERTEX),
+    ):
+        result = find_hover_target(
+            shapes=shapes,
+            point=_point(20 + offset / scale, 20),
+            scale=scale,
+            epsilon=_EPSILON,
+            point_size=_POINT_SIZE,
+            priority_shape=priority_shape,
+        )
+        assert result is not None
+        assert result.shape is expected_shape
+        assert result.kind == expected_kind
+
+
+def test_closest_vertex_wins_over_previously_hovered_polygon() -> None:
+    farther = _polygon([(20, 20), (80, 20), (50, 80)])
+    nearer = _polygon([(26, 20), (90, 20), (60, 80)])
+    result = find_hover_target(
+        shapes=[nearer, farther],
+        point=_point(25, 20),
+        scale=_SCALE,
+        epsilon=_EPSILON,
+        point_size=_POINT_SIZE,
+        priority_shape=farther,
+    )
+    assert result is not None
+    assert result.shape is nearer
+    assert result.index == 0
+
+
+def test_standalone_point_keeps_its_visible_pick_radius() -> None:
+    point = Shape(shape_type="point", points=[[20, 20]])
+    result = find_hover_target(
+        shapes=[point],
+        point=_point(25, 20),
+        scale=_SCALE,
+        epsilon=_EPSILON,
+        point_size=_POINT_SIZE,
+        priority_shape=None,
+    )
+    assert result is None
+
+
+def test_hidden_standalone_point_cannot_steal_vertex_hover() -> None:
+    polygon = _polygon([(20, 20), (80, 20), (50, 80)])
+    hidden = Shape(shape_type="point", points=[[26, 20]], visible=False)
+    result = find_hover_target(
+        shapes=[polygon, hidden],
+        point=_point(26, 20),
+        scale=_SCALE,
+        epsilon=_EPSILON,
+        point_size=_POINT_SIZE,
+        priority_shape=hidden,
+    )
+    assert result is not None
+    assert result.shape is polygon
+
+
 # ---------------------------------------------------------------------------
 # find_hover_target — reverse paint order for non-priority shapes
 # ---------------------------------------------------------------------------
@@ -344,6 +418,7 @@ def test_is_within_pick_threshold_larger_scale_smaller_image_radius() -> None:
     ("role", "expected"),
     [
         (CursorRole.DEFAULT, Qt.CursorShape.ArrowCursor),
+        (CursorRole.EDIT, Qt.CursorShape.BitmapCursor),
         (CursorRole.DRAW, Qt.CursorShape.CrossCursor),
         (CursorRole.HANDLE, Qt.CursorShape.PointingHandCursor),
         (CursorRole.GRAB, Qt.CursorShape.OpenHandCursor),

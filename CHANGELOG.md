@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added left-button canvas panning from empty space while editing shapes or placing standalone, AI, or skeleton points on a zoomed image; clicks still place points, and drags create no annotations.
+
 - Added an optional Pose template selector to Custom YOLO Detector, remembered per model, to supply keypoint names and bones for pose predictions in single-image and frame/video refinement workflows; mismatched keypoint counts are rejected.
 
 - Quick Draw now remembers the last started session's shape type, ordered classes, and random-selection option between runs and application restarts.
@@ -42,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expanded the Settings dialog with a scrollable page of workflow-oriented groups, an icon-labeled section index for quick navigation, and explanatory descriptions, so that auto-save, saving image data, keep-previous annotation/zoom/brightness-contrast, fill-drawing, label sorting/completion/text-field behavior, and the default AI model can all be changed in-app with immediate apply, instead of requiring hand-editing the config file ([#2403](https://github.com/wkentaro/labelme/pull/2403))
 
 ### Changed
+
+- Standardized Edit Shapes on a compact pointing cursor with smooth edges, a subtle graphite fill, and a white outline, keeping its click hotspot at the arrow tip when hovering or dragging points, edges, and shapes.
 
 - Quick-Draw Skeleton now repeats the selected template immediately after each animal, supports E for a one-edit correction or return to drawing, and uses Space to save and advance with the same template.
 
@@ -81,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed the `logger_level` config key, which had no effect: log verbosity has always been controlled solely by the `--logger-level` CLI flag. A `logger_level` entry remaining in an existing `~/.labelmerc` is dropped on load, so old config files keep working unchanged ([#2402](https://github.com/wkentaro/labelme/pull/2402))
 
 ### Fixed
+
+- Fixed nearby polygon vertices taking priority over closer standalone points during editing; point picking now uses distance, and clicks follow the highlighted target.
 
 - Fixed Open Dir mixing folders and files according to desktop preferences; its built-in picker now defaults to alphabetical order with folders first on every platform.
 

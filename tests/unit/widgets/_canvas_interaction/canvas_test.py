@@ -109,6 +109,21 @@ def _clear_cursor_override(canvas: Canvas) -> None:
     canvas._release_cursor()
 
 
+def _assert_precise_edit_cursor() -> None:
+    cursor = QtWidgets.QApplication.overrideCursor()
+    assert cursor is not None
+    assert cursor.shape() == Qt.CursorShape.BitmapCursor
+    assert cursor.pixmap().deviceIndependentSize() == QtCore.QSizeF(15, 18)
+    assert cursor.hotSpot() == QtCore.QPoint(1, 1)
+    image = cursor.pixmap().toImage()
+    ratio = cursor.pixmap().devicePixelRatio()
+    tip = cursor.hotSpot() * ratio
+    assert image.pixelColor(tip).alpha() > 0
+    # Keep the area above and to the left of the tip transparent.
+    assert all(image.pixelColor(x, 0).alpha() == 0 for x in range(image.width()))
+    assert all(image.pixelColor(0, y).alpha() == 0 for y in range(image.height()))
+
+
 @pytest.mark.gui
 @pytest.mark.parametrize("scale", [0.65, 1.0, 2.5])
 @pytest.mark.parametrize("mode", ["point", "line", "linestrip", "rectangle", "circle"])
@@ -481,17 +496,17 @@ def test_cursor_reverts_to_no_override_after_cursor_cleared(canvas: Canvas) -> N
 
 
 @pytest.mark.gui
-def test_cursor_is_arrow_when_hovering_empty_canvas_in_edit_mode(
+def test_cursor_is_precise_pointer_when_hovering_empty_canvas_in_edit_mode(
     canvas: Canvas,
 ) -> None:
-    # Moving over blank canvas area (no shapes) leaves no override cursor.
+    # The precise pointer also applies between shapes on the canvas.
     canvas.set_editing(value=True)
     canvas.scale = 1.0
     pos = _image_to_widget(canvas=canvas, img_x=100, img_y=50)
 
     canvas.mouseMoveEvent(_make_move_event(pos=pos))
 
-    assert QtWidgets.QApplication.overrideCursor() is None
+    _assert_precise_edit_cursor()
 
 
 # ---------------------------------------------------------------------------
@@ -500,11 +515,10 @@ def test_cursor_is_arrow_when_hovering_empty_canvas_in_edit_mode(
 
 
 @pytest.mark.gui
-def test_cursor_is_open_hand_when_hovering_shape_body_in_edit_mode(
+def test_cursor_is_precise_pointer_when_hovering_shape_body_in_edit_mode(
     canvas: Canvas,
 ) -> None:
-    # Hovering the interior of a shape (not near a vertex or edge) uses
-    # OpenHandCursor to signal the shape is draggable.
+    # Shape bodies use the same compact pointer as points and edges.
     shape = Shape(
         shape_type="polygon",
         points=np.array([(10, 10), (40, 10), (40, 40), (10, 40)], dtype=np.float64),
@@ -520,7 +534,7 @@ def test_cursor_is_open_hand_when_hovering_shape_body_in_edit_mode(
 
     override = QtWidgets.QApplication.overrideCursor()
     assert override is not None
-    assert override.shape() == Qt.CursorShape.OpenHandCursor
+    _assert_precise_edit_cursor()
     _clear_cursor_override(canvas=canvas)
 
 
@@ -559,7 +573,7 @@ def test_shape_hidden_while_hovered_stops_being_hover_interactive(
     )
 
     assert canvas.hovered_shape is None
-    assert QtWidgets.QApplication.overrideCursor() is None
+    _assert_precise_edit_cursor()
 
 
 # ---------------------------------------------------------------------------
@@ -568,10 +582,10 @@ def test_shape_hidden_while_hovered_stops_being_hover_interactive(
 
 
 @pytest.mark.gui
-def test_cursor_is_pointing_hand_when_hovering_vertex_in_edit_mode(
+def test_cursor_is_precise_pointer_when_hovering_vertex_in_edit_mode(
     canvas: Canvas,
 ) -> None:
-    # Hovering a vertex in EDIT mode engages PointingHandCursor.
+    # Hovering a vertex keeps the exact same tip hotspot as the canvas.
     shape = Shape(
         shape_type="polygon",
         points=np.array([(10, 10), (40, 10), (40, 40), (10, 40)], dtype=np.float64),
@@ -586,7 +600,7 @@ def test_cursor_is_pointing_hand_when_hovering_vertex_in_edit_mode(
 
     override = QtWidgets.QApplication.overrideCursor()
     assert override is not None
-    assert override.shape() == Qt.CursorShape.PointingHandCursor
+    _assert_precise_edit_cursor()
     _clear_cursor_override(canvas=canvas)
 
 
@@ -596,11 +610,10 @@ def test_cursor_is_pointing_hand_when_hovering_vertex_in_edit_mode(
 
 
 @pytest.mark.gui
-def test_cursor_is_pointing_hand_when_hovering_edge_in_edit_mode(
+def test_cursor_is_precise_pointer_when_hovering_edge_in_edit_mode(
     canvas: Canvas,
 ) -> None:
-    # Hovering an edge midpoint of a polygon (but not near a vertex) also
-    # uses PointingHandCursor because clicking inserts a vertex.
+    # Edge insertion uses the same precise pointer as vertex editing.
     shape = Shape(
         shape_type="polygon",
         points=np.array([(10, 10), (90, 10), (90, 40), (10, 40)], dtype=np.float64),
@@ -616,8 +629,126 @@ def test_cursor_is_pointing_hand_when_hovering_edge_in_edit_mode(
 
     override = QtWidgets.QApplication.overrideCursor()
     assert override is not None
-    assert override.shape() == Qt.CursorShape.PointingHandCursor
+    _assert_precise_edit_cursor()
     _clear_cursor_override(canvas=canvas)
+
+
+@pytest.mark.gui
+@pytest.mark.parametrize("scale", [0.65, 1.0, 2.5])
+def test_precise_pointer_keeps_vertex_drag_at_its_tip(
+    canvas: Canvas, scale: float
+) -> None:
+    shape = Shape(
+        shape_type="polygon",
+        points=np.array([(20, 20), (80, 20), (50, 80)], dtype=np.float64),
+        closed=True,
+    )
+    canvas.load_shapes(shapes=[shape])
+    canvas.set_editing(True)
+    canvas.scale = scale
+    start = _image_to_widget(canvas, 20, 20)
+    destination = _image_to_widget(canvas, 35, 30)
+
+    canvas.mouseMoveEvent(_make_move_event(start))
+    _assert_precise_edit_cursor()
+    canvas.mousePressEvent(_make_press_event(start, Qt.MouseButton.LeftButton))
+    canvas.mouseMoveEvent(_make_drag_event(destination))
+    _assert_precise_edit_cursor()
+    canvas.mouseReleaseEvent(
+        _make_release_event(destination, Qt.MouseButton.LeftButton)
+    )
+
+    np.testing.assert_allclose(shape.points[0], [35, 30])
+
+
+@pytest.mark.gui
+@pytest.mark.parametrize("scale", [0.5, 1.0, 2.5])
+@pytest.mark.parametrize("reverse_order", [False, True])
+@pytest.mark.parametrize("move_before_click", [False, True])
+def test_nearby_standalone_point_is_selected_and_dragged_instead_of_polygon(
+    canvas: Canvas, scale: float, reverse_order: bool, move_before_click: bool
+) -> None:
+    polygon = Shape(
+        shape_type="polygon",
+        points=np.array([(20, 20), (90, 20), (90, 80), (20, 80)], dtype=np.float64),
+        closed=True,
+    )
+    original_polygon = polygon.points.copy()
+    location = np.array([20 + 6 / scale, 20 + 4 / scale])
+    point = Shape(shape_type="point", points=np.array([location]))
+    shapes = [point, polygon] if reverse_order else [polygon, point]
+    canvas.load_shapes(shapes=shapes)
+    canvas.set_editing(True)
+    canvas.scale = scale
+    # Match the application's selection handler for whole-shape dragging.
+    canvas.selection_changed.connect(
+        lambda selected: setattr(canvas, "selected_shapes", selected)
+    )
+    canvas.mouseMoveEvent(_make_move_event(_image_to_widget(canvas, 20, 20)))
+    assert canvas.hovered_shape is polygon
+    assert canvas._hovered_vertex == 0
+
+    start = _image_to_widget(canvas, *location)
+    if move_before_click:
+        canvas.mouseMoveEvent(_make_move_event(start))
+        assert canvas.hovered_shape is point
+        assert canvas._hovered_vertex is None
+    canvas.mousePressEvent(_make_press_event(start, Qt.MouseButton.LeftButton))
+    assert canvas.hovered_shape is point
+    assert canvas.selected_shapes == [point]
+    destination = location + [15, 10]
+    end = _image_to_widget(canvas, *destination)
+    canvas.mouseMoveEvent(_make_drag_event(end))
+    canvas.mouseReleaseEvent(_make_release_event(end, Qt.MouseButton.LeftButton))
+
+    np.testing.assert_allclose(point.points[0], destination)
+    np.testing.assert_array_equal(polygon.points, original_polygon)
+
+
+@pytest.mark.gui
+def test_edit_pointer_restores_previous_cursor_on_leave_and_focus_loss(
+    canvas: Canvas,
+) -> None:
+    QtWidgets.QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+    for release in (canvas.leaveEvent, canvas.focusOutEvent):
+        canvas.enterEvent(QtCore.QEvent(QtCore.QEvent.Type.Enter))
+        _assert_precise_edit_cursor()
+        for position in (QPointF(30, 30), QPointF(60, 60), QPointF(90, 30)):
+            canvas.mouseMoveEvent(_make_move_event(position))
+        release(QtGui.QFocusEvent(QtCore.QEvent.Type.FocusOut))
+        cursor = QtWidgets.QApplication.overrideCursor()
+        assert cursor is not None
+        assert cursor.shape() == Qt.CursorShape.WaitCursor
+
+
+@pytest.mark.gui
+def test_switching_modes_updates_cursor_without_mouse_movement(
+    canvas: Canvas, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(canvas, "underMouse", lambda: True)
+    canvas.set_editing(True)
+    _assert_precise_edit_cursor()
+    canvas.set_editing(False)
+    cursor = QtWidgets.QApplication.overrideCursor()
+    assert cursor is not None
+    assert cursor.pixmap().size() == QtCore.QSize(23, 23)
+    canvas.set_editing(True)
+    _assert_precise_edit_cursor()
+    canvas.leaveEvent(QtCore.QEvent(QtCore.QEvent.Type.Leave))
+    assert QtWidgets.QApplication.overrideCursor() is None
+
+
+@pytest.mark.gui
+def test_panning_retains_hand_cursor(canvas: Canvas) -> None:
+    canvas.enterEvent(QtCore.QEvent(QtCore.QEvent.Type.Enter))
+    _assert_precise_edit_cursor()
+    canvas._begin_pan(_make_press_event(QPointF(30, 30), Qt.MouseButton.MiddleButton))
+    cursor = QtWidgets.QApplication.overrideCursor()
+    assert cursor is not None
+    assert cursor.shape() == Qt.CursorShape.OpenHandCursor
+    canvas._finish_pan()
+    canvas.mouseMoveEvent(_make_move_event(QPointF(30, 30)))
+    _assert_precise_edit_cursor()
 
 
 @pytest.mark.gui
@@ -829,9 +960,7 @@ def test_vertex_hover_within_epsilon_screen_pixels_gives_pointing_hand(
     assert override is not None, (
         f"scale={scale}: expected a cursor override (7 screen px from vertex)"
     )
-    assert override.shape() == Qt.CursorShape.PointingHandCursor, (
-        f"scale={scale}: expected PointingHandCursor at 7 screen px from vertex"
-    )
+    _assert_precise_edit_cursor()
     _clear_cursor_override(canvas=canvas)
 
 
@@ -902,7 +1031,5 @@ def test_screen_pixel_hit_radius_is_constant_across_scale_levels(
         )
         override = QtWidgets.QApplication.overrideCursor()
         assert override is not None, f"scale={scale}: expected cursor override"
-        assert override.shape() == Qt.CursorShape.PointingHandCursor, (
-            f"scale={scale}: expected PointingHandCursor"
-        )
+        _assert_precise_edit_cursor()
         _clear_cursor_override(canvas=canvas)

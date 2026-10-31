@@ -9,7 +9,9 @@ import numpy.typing as npt
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtGui import QCursor
+from PySide6.QtGui import QLinearGradient
 from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainterPath
 from PySide6.QtGui import QPen
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QMenu
@@ -49,13 +51,36 @@ def find_hover_target(
         priority_shape=priority_shape,
     )
 
-    # Pass 1: vertex proximity
+    # Pass 1: nearest vertex or standalone point. Candidate order only breaks
+    # exact ties; a previously hovered shape must not hide a closer point.
+    nearest_target: HitTarget | None = None
+    nearest_distance = float("inf")
     for shape in candidates:
-        idx = nearest_vertex_index(
-            shape=shape, point=point, scale=scale, epsilon=epsilon
-        )
-        if idx is not None:
-            return HitTarget(kind=HitKind.VERTEX, shape=shape, index=idx)
+        if shape.shape_type == "point":
+            if not is_hit_by_point(
+                shape=shape,
+                point=point,
+                scale=scale,
+                point_size=point_size,
+                epsilon=epsilon,
+            ):
+                continue
+            idx = 0
+            # A standalone point is selected and dragged as a whole shape.
+            target = HitTarget(kind=HitKind.BODY, shape=shape, index=None)
+        else:
+            idx = nearest_vertex_index(
+                shape=shape, point=point, scale=scale, epsilon=epsilon
+            )
+            if idx is None:
+                continue
+            target = HitTarget(kind=HitKind.VERTEX, shape=shape, index=idx)
+        distance = float(np.linalg.norm((shape.points[idx] - point) * scale))
+        if distance < nearest_distance:
+            nearest_target = target
+            nearest_distance = distance
+    if nearest_target is not None:
+        return nearest_target
 
     # Pass 2: rotation handle proximity
     for shape in candidates:
@@ -117,6 +142,7 @@ def is_within_pick_threshold(
 
 class CursorRole(enum.Enum):
     DEFAULT = "default"
+    EDIT = "edit"
     DRAW = "draw"
     HANDLE = "handle"
     GRAB = "grab"
@@ -125,6 +151,7 @@ class CursorRole(enum.Enum):
 
 _CURSOR_SHAPE_MAP: Final[dict[CursorRole, Qt.CursorShape]] = {
     CursorRole.DEFAULT: Qt.CursorShape.ArrowCursor,
+    CursorRole.EDIT: Qt.CursorShape.BitmapCursor,
     CursorRole.DRAW: Qt.CursorShape.CrossCursor,
     CursorRole.HANDLE: Qt.CursorShape.PointingHandCursor,
     CursorRole.GRAB: Qt.CursorShape.OpenHandCursor,
@@ -137,6 +164,39 @@ assert set(_CURSOR_SHAPE_MAP) == set(CursorRole), (
 
 def cursor_shape_for(role: CursorRole) -> Qt.CursorShape:
     return _CURSOR_SHAPE_MAP[role]
+
+
+def make_edit_cursor() -> QCursor:
+    # Draw at double resolution for smooth edges on both standard and HiDPI
+    # displays, while keeping the compact logical size and exact tip hotspot.
+    pixmap = QPixmap(30, 36)
+    pixmap.setDevicePixelRatio(2)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    path = QPainterPath()
+    path.moveTo(1, 1)
+    path.lineTo(2, 13.8)
+    path.lineTo(5.4, 10)
+    path.lineTo(8, 15.8)
+    path.quadTo(8.3, 16.4, 8.9, 16.1)
+    path.lineTo(10, 15.55)
+    path.quadTo(10.5, 15.3, 10.2, 14.75)
+    path.lineTo(7.5, 9.25)
+    path.lineTo(12.35, 8.95)
+    path.closeSubpath()
+    fill = QLinearGradient(1, 1, 10, 16)
+    fill.setColorAt(0, QColor("#202733"))
+    fill.setColorAt(1, QColor("#394657"))
+    painter = QPainter(pixmap)
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        outline = QPen(Qt.GlobalColor.white, 0.9)
+        outline.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(outline)
+        painter.setBrush(fill)
+        painter.drawPath(path)
+    finally:
+        painter.end()
+    return QCursor(pixmap, 1, 1)
 
 
 def make_drawing_cursor() -> QCursor:
