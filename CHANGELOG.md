@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added Point as a Quick Draw shape type: each click places the next ordered class, with class-key corrections, undo, temporary editing, and remembered settings.
+
 - Added left-button canvas panning from empty space while editing shapes or placing standalone, AI, or skeleton points on a zoomed image; clicks still place points, and drags create no annotations.
 
 - Added an optional Pose template selector to Custom YOLO Detector, remembered per model, to supply keypoint names and bones for pose predictions in single-image and frame/video refinement workflows; mismatched keypoint counts are rejected.

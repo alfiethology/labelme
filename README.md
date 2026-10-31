@@ -77,7 +77,7 @@ See [Animal pose annotation](docs/pose-estimation.md) for the complete workflow.
 
 - Right-click a class in **Label List** and choose **Merge with…** to combine
   inconsistent names across the current image set.
-- [Draw boxes or polygons with Quick Draw](#draw-repeated-objects-with-quick-draw),
+- [Draw boxes, polygons, or points with Quick Draw](#draw-repeated-objects-with-quick-draw),
   with automatic class assignment, number-key corrections, and Space to save and
   advance. Images follow file order unless random selection is enabled.
 - [Use the canvas-only Full Screen Editor](#full-screen-editor) with **F11**.
@@ -530,13 +530,15 @@ previous layout. Drawing and navigation shortcuts remain available.
 ### Draw repeated objects with Quick Draw
 
 Open an image directory, then choose **Tools > Quick Draw…**. Select one
-**Shape type** for the entire session: **Bounding box** or **Polygon**. Enter up
-to nine classes in the numbered columns, using **Add class** for more columns.
+**Shape type** for the entire session: **Bounding box**, **Polygon**, or **Point**.
+Enter up to nine classes in the numbered columns, using **Add class** for more
+columns.
 Click a class cell to choose from the current Label List, or type a new name.
 Shapes receive classes from left to right in drawing order, repeating the
 sequence as needed and restarting on each image. Draw boxes with two corner
 clicks; draw polygon vertices and press **Enter** or click the first vertex to
-close the polygon. No class prompt appears after drawing.
+close the polygon. In **Point** mode, each click places one point with the next
+class in your column order. No class prompt appears after drawing.
 The popup remembers the shape type, ordered classes, and random-selection option
 from the last run you started, including after restarting Labelme. Cancelling
 the popup leaves those remembered settings unchanged.

@@ -114,7 +114,7 @@ class _ZoomMode(enum.Enum):
 class _QuickDrawSession:
     labels: tuple[str, ...]
     remaining: list[str]
-    shape_type: Literal["rectangle", "polygon"] = "rectangle"
+    shape_type: Literal["rectangle", "polygon", "point"] = "rectangle"
     random_images: bool = False
     loading: bool = False
     editing: bool = False
@@ -1133,7 +1133,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self._toggle_quick_draw,
             checkable=True,
             tip=self.tr(
-                "Add named boxes or polygons to images, preserving existing shapes; "
+                "Add named boxes, polygons, or points, preserving existing shapes; "
                 "Space saves and moves on, Escape stops"
             ),
         )
@@ -1539,9 +1539,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 "Quick Draw: {shape} {index} — {label} | "
                 "E: edit latest · Space: save and next · Esc: stop"
             ).format(
-                shape=self.tr("polygon")
-                if session.shape_type == "polygon"
-                else self.tr("box"),
+                shape={
+                    "rectangle": self.tr("box"),
+                    "polygon": self.tr("polygon"),
+                    "point": self.tr("point"),
+                }[session.shape_type],
                 index=completed + 1,
                 label=session.label_for(completed),
             )
@@ -4571,7 +4573,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 for key in keys
             }
         is_point_mode = self._canvas_widgets.canvas.create_mode == "point"
-        if is_point_mode:
+        if is_point_mode and quick_draw is None:
             cached = self._point_mode_label_state
             if text and cached and cached[0] == text:
                 _, cached_flags, group_id, description = cached
@@ -4603,7 +4605,7 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             text = ""
         if text:
-            if is_point_mode:
+            if is_point_mode and quick_draw is None:
                 self._point_mode_label_state = (
                     text,
                     dict(flags),

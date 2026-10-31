@@ -730,7 +730,7 @@ def test_dialog_has_one_shape_type_and_up_to_nine_class_columns(qtbot: QtBot) ->
     qtbot.addWidget(dialog)
     assert [
         dialog.shape_type.itemData(i) for i in range(dialog.shape_type.count())
-    ] == ["rectangle", "polygon"]
+    ] == ["rectangle", "polygon", "point"]
     assert dialog.table.rowCount() == 1
     for i in range(9):
         if i:
@@ -926,7 +926,7 @@ def test_clicking_visited_image_then_restarting_resumes_from_it(
 
 
 @pytest.mark.parametrize("classes", [("rat",), ("rat", "rat", "mouse")])
-@pytest.mark.parametrize("shape_type", ["rectangle", "polygon"])
+@pytest.mark.parametrize("shape_type", ["rectangle", "polygon", "point"])
 @pytest.mark.parametrize("random_images", [False, True])
 def test_quick_draw_remembers_last_started_settings_after_reopening_and_restart(
     main_win: MainWinFactory,
@@ -963,7 +963,9 @@ def test_quick_draw_remembers_last_started_settings_after_reopening_and_restart(
         inspected.append(True)
         # Changes cancelled here must not replace the last started settings.
         dialog.table.item(0, 0).setText("cancelled")
-        dialog.shape_type.setCurrentIndex(1 - dialog.shape_type.currentIndex())
+        dialog.shape_type.setCurrentIndex(
+            (dialog.shape_type.currentIndex() + 1) % dialog.shape_type.count()
+        )
         dialog.random_images.setChecked(not random_images)
         return QtWidgets.QDialog.DialogCode.Rejected
 
@@ -1057,3 +1059,85 @@ def test_e_can_edit_an_older_existing_shape_then_resume_quick_draw(
     assert saved[0]["points"] == np_first
     assert [shape["label"] for shape in saved] == ["existing_rat", "another_rat", "cat"]
     assert saved[0]["flags"] == original["shapes"][0]["flags"]
+
+
+def test_quick_draw_points_follow_class_order_and_preserve_existing_annotations(
+    quick_draw_win: MainWindow,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    win = quick_draw_win
+    image = _path(win).parent / "c.png"
+    old = _write_existing_annotation(image)
+    _configure(monkeypatch, ("nose", "tail"), "point")
+    monkeypatch.setattr(
+        win._label_dialog, "popup", lambda *a: pytest.fail("Label popup")
+    )
+    win._config["label_flags"] = {"^nose$": ["visible"]}
+    win._toggle_quick_draw(True)
+    canvas = win._canvas_widgets.canvas
+    assert canvas.create_mode == "point"
+    assert "point 1 — nose" in win._quick_draw_progress.text()
+    # Quick Draw's ordered classes must not inherit regular point-mode metadata.
+    win._point_mode_label_state = ("nose", {"visible": True}, 17, "old point")
+    click_canvas_fraction(qtbot, canvas, (0.4, 0.4))
+    assert canvas.shapes[-1].label == "nose"
+    assert canvas.shapes[-1].flags == {"visible": False}
+    assert canvas.shapes[-1].group_id is None
+    assert canvas.shapes[-1].description == ""
+    click_canvas_fraction(qtbot, canvas, (0.6, 0.6))
+    assert [s.label for s in canvas.shapes] == ["existing_rat", "nose", "tail"]
+    qtbot.keyClick(canvas, Qt.Key.Key_1)
+    assert canvas.shapes[-1].label == "nose"
+    win.undo_shape_edit()
+    assert canvas.shapes[-1].label == "tail"
+    win.undo_shape_edit()
+    assert "point 2 — tail" in win._quick_draw_progress.text()
+    click_canvas_fraction(qtbot, canvas, (0.6, 0.6))
+    click_canvas_fraction(qtbot, canvas, (0.8, 0.8))
+    assert [s.label for s in canvas.shapes] == ["existing_rat", "nose", "tail", "nose"]
+    assert _path(win) == image
+    assert json.loads(image.with_suffix(".json").read_text()) == old
+    qtbot.keyClick(canvas, Qt.Key.Key_Space)
+    saved = json.loads(image.with_suffix(".json").read_text())
+    assert all(
+        s["shape_type"] == "point" and len(s["points"]) == 1
+        for s in saved["shapes"][1:]
+    )
+    for key, value in old["shapes"][0].items():
+        assert saved["shapes"][0][key] == value
+    assert _path(win).name == "b.png"
+    assert canvas.create_mode == "point"
+    assert "point 1 — nose" in win._quick_draw_progress.text()
+    click_canvas_fraction(qtbot, canvas, (0.3, 0.3))
+    assert canvas.shapes[0].label == "nose"
+
+
+def test_quick_draw_point_edit_resumes_point_placement(
+    quick_draw_win: MainWindow,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    win = quick_draw_win
+    _configure(monkeypatch, ("nose", "tail"), "point")
+    win._toggle_quick_draw(True)
+    canvas = win._canvas_widgets.canvas
+    click_canvas_fraction(qtbot, canvas, (0.4, 0.4))
+    point = canvas.shapes[0]
+    original = point.points.copy()
+    qtbot.keyClick(canvas, Qt.Key.Key_E)
+    start = image_to_widget_pos(canvas, QPointF(40, 40))
+    qtbot.mouseMove(canvas, start)
+    drag_canvas(
+        qtbot,
+        canvas,
+        Qt.MouseButton.LeftButton,
+        start,
+        image_to_widget_pos(canvas, QPointF(45, 45)),
+    )
+    assert (point.points != original).any()
+    assert canvas.mode == _CanvasMode.CREATE
+    assert canvas.create_mode == "point"
+    assert win._quick_draw is not None
+    click_canvas_fraction(qtbot, canvas, (0.7, 0.7))
+    assert canvas.shapes[-1].label == "tail"

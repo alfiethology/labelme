@@ -83,6 +83,7 @@ class QuickDrawDialog(QtWidgets.QDialog):
         self.shape_type = QtWidgets.QComboBox()
         self.shape_type.addItem(self.tr("Bounding box"), "rectangle")
         self.shape_type.addItem(self.tr("Polygon"), "polygon")
+        self.shape_type.addItem(self.tr("Point"), "point")
         shape_row.addRow(self.tr("Shape type"), self.shape_type)
         layout.addLayout(shape_row)
         self.table = QtWidgets.QTableWidget(1, 0)
